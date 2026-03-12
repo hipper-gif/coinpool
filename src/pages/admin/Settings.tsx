@@ -1,33 +1,32 @@
 import { useState, useEffect } from 'react';
+import type { FormEvent } from 'react';
 import apiClient from '../../api/axios';
 
 type Rank = 'bronze' | 'silver' | 'gold' | 'platinum' | 'diamond';
 
-interface RankCondition {
+interface RankConditionRow {
+  rank: Rank;
   min_investment: number;
   min_direct_referrals: number;
   min_group_investment: number;
+  mm_min_investment: number;
+  mm_min_direct_referrals: number;
+  mm_min_group_investment: number;
   infinity_rate: number;
-  mega_match_same_rate: number;
-  mega_match_upper_rate: number;
+  megamatch_same_rate: number;
+  megamatch_upper_rate: number;
   pool_distribution_rate: number;
   pool_contribution_rate: number;
 }
 
-interface UnilevelRates {
-  level1: number;
-  level2: number;
-  level3: number;
-  level4: number;
+interface UnilevelRateRow {
+  level: number;
+  rate: number;
 }
 
-interface SettingsData {
-  rank_conditions: Record<Rank, RankCondition>;
-  unilevel_rates: UnilevelRates;
-}
-
-interface SettingsResponse {
-  settings: SettingsData;
+interface ApiResponse {
+  rank_conditions: RankConditionRow[];
+  unilevel_rates: UnilevelRateRow[];
 }
 
 const rankLabel: Record<Rank, string> = {
@@ -40,33 +39,14 @@ const rankLabel: Record<Rank, string> = {
 
 const rankOrder: Rank[] = ['bronze', 'silver', 'gold', 'platinum', 'diamond'];
 
-const defaultRankCondition: RankCondition = {
-  min_investment: 0,
-  min_direct_referrals: 0,
-  min_group_investment: 0,
-  infinity_rate: 0,
-  mega_match_same_rate: 0,
-  mega_match_upper_rate: 0,
-  pool_distribution_rate: 0,
-  pool_contribution_rate: 0,
-};
-
-const defaultSettings: SettingsData = {
-  rank_conditions: {
-    bronze: { ...defaultRankCondition },
-    silver: { ...defaultRankCondition },
-    gold: { ...defaultRankCondition },
-    platinum: { ...defaultRankCondition },
-    diamond: { ...defaultRankCondition },
-  },
-  unilevel_rates: { level1: 0, level2: 0, level3: 0, level4: 0 },
-};
+type RankField = keyof Omit<RankConditionRow, 'rank'>;
 
 type Tab = 'rank' | 'unilevel';
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<Tab>('rank');
-  const [settings, setSettings] = useState<SettingsData>(defaultSettings);
+  const [rankConditions, setRankConditions] = useState<RankConditionRow[]>([]);
+  const [unilevelRates, setUnilevelRates] = useState<UnilevelRateRow[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveLoading, setSaveLoading] = useState(false);
@@ -76,8 +56,9 @@ export default function Settings() {
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const res = await apiClient.get<SettingsResponse>('/settings/index.php');
-        setSettings(res.data.settings);
+        const res = await apiClient.get<ApiResponse>('/settings/index.php');
+        setRankConditions(res.data.rank_conditions);
+        setUnilevelRates(res.data.unilevel_rates);
       } catch {
         setError('設定の取得に失敗しました。');
       } finally {
@@ -87,53 +68,39 @@ export default function Settings() {
     void fetchSettings();
   }, []);
 
-  const handleRankChange = (
-    rank: Rank,
-    field: keyof RankCondition,
-    value: string,
-  ) => {
-    setSettings((prev) => ({
-      ...prev,
-      rank_conditions: {
-        ...prev.rank_conditions,
-        [rank]: {
-          ...prev.rank_conditions[rank],
-          [field]: Number(value),
-        },
-      },
-    }));
+  const getRankCondition = (rank: Rank): RankConditionRow | undefined =>
+    rankConditions.find((rc) => rc.rank === rank);
+
+  const handleRankChange = (rank: Rank, field: RankField, value: string) => {
+    setRankConditions((prev) =>
+      prev.map((rc) =>
+        rc.rank === rank ? { ...rc, [field]: Number(value) } : rc,
+      ),
+    );
   };
 
-  const handleUnilevelChange = (
-    level: keyof UnilevelRates,
-    value: string,
-  ) => {
-    setSettings((prev) => ({
-      ...prev,
-      unilevel_rates: {
-        ...prev.unilevel_rates,
-        [level]: Number(value),
-      },
-    }));
+  const handleUnilevelChange = (level: number, value: string) => {
+    setUnilevelRates((prev) =>
+      prev.map((ur) =>
+        ur.level === level ? { ...ur, rate: Number(value) } : ur,
+      ),
+    );
   };
 
-  const handleSave = async (e: React.FormEvent) => {
+  const handleSave = async (e: FormEvent) => {
     e.preventDefault();
     setSaveError(null);
     setSaveSuccess(false);
     setSaveLoading(true);
     try {
-      await apiClient.put('/settings/index.php', { settings });
+      await apiClient.put('/settings/index.php', {
+        rank_conditions: rankConditions,
+        unilevel_rates: unilevelRates,
+      });
       setSaveSuccess(true);
-      // 3秒後に成功メッセージを消す
       setTimeout(() => setSaveSuccess(false), 3000);
-    } catch (err: unknown) {
-      const axiosErr = err as {
-        response?: { data?: { message?: string } };
-      };
-      setSaveError(
-        axiosErr.response?.data?.message ?? '設定の保存に失敗しました。',
-      );
+    } catch {
+      setSaveError('設定の保存に失敗しました。');
     } finally {
       setSaveLoading(false);
     }
@@ -159,7 +126,6 @@ export default function Settings() {
     <div>
       <h2 className="text-2xl font-bold text-gray-800 mb-6">設定</h2>
 
-      {/* タブ */}
       <div className="flex gap-1 mb-6 bg-gray-100 rounded-lg p-1 w-fit">
         <button
           onClick={() => setActiveTab('rank')}
@@ -195,16 +161,17 @@ export default function Settings() {
       )}
 
       <form onSubmit={(e) => void handleSave(e)}>
-        {/* ランク条件タブ */}
         {activeTab === 'rank' && (
           <div className="space-y-4">
             {rankOrder.map((rank) => {
-              const cond = settings.rank_conditions[rank] ?? defaultRankCondition;
+              const cond = getRankCondition(rank);
+              if (!cond) return null;
               return (
                 <div key={rank} className="bg-white rounded-xl shadow-sm p-6">
                   <h3 className="text-base font-semibold text-gray-700 mb-4">
                     {rankLabel[rank]}
                   </h3>
+                  <p className="text-xs font-medium text-gray-500 mb-2 mt-1">インフィニティ条件</p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
                     <FieldInput
                       label="最低運用額 ($)"
@@ -214,52 +181,60 @@ export default function Settings() {
                     <FieldInput
                       label="最低直紹介数"
                       value={cond.min_direct_referrals}
-                      onChange={(v) =>
-                        handleRankChange(rank, 'min_direct_referrals', v)
-                      }
+                      onChange={(v) => handleRankChange(rank, 'min_direct_referrals', v)}
                       step="1"
                     />
                     <FieldInput
                       label="最低グループ運用額 ($)"
                       value={cond.min_group_investment}
-                      onChange={(v) =>
-                        handleRankChange(rank, 'min_group_investment', v)
-                      }
+                      onChange={(v) => handleRankChange(rank, 'min_group_investment', v)}
                     />
+                  </div>
+                  <p className="text-xs font-medium text-gray-500 mb-2 mt-4">メガマッチ条件</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
+                    <FieldInput
+                      label="MM最低運用額 ($)"
+                      value={cond.mm_min_investment}
+                      onChange={(v) => handleRankChange(rank, 'mm_min_investment', v)}
+                    />
+                    <FieldInput
+                      label="MM最低直紹介数"
+                      value={cond.mm_min_direct_referrals}
+                      onChange={(v) => handleRankChange(rank, 'mm_min_direct_referrals', v)}
+                      step="1"
+                    />
+                    <FieldInput
+                      label="MM最低グループ運用額 ($)"
+                      value={cond.mm_min_group_investment}
+                      onChange={(v) => handleRankChange(rank, 'mm_min_group_investment', v)}
+                    />
+                  </div>
+                  <p className="text-xs font-medium text-gray-500 mb-2 mt-4">ボーナス率</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 text-sm">
                     <FieldInput
                       label="インフィニティ率 (%)"
                       value={cond.infinity_rate}
-                      onChange={(v) =>
-                        handleRankChange(rank, 'infinity_rate', v)
-                      }
+                      onChange={(v) => handleRankChange(rank, 'infinity_rate', v)}
                     />
                     <FieldInput
                       label="メガマッチ同ランク率 (%)"
-                      value={cond.mega_match_same_rate}
-                      onChange={(v) =>
-                        handleRankChange(rank, 'mega_match_same_rate', v)
-                      }
+                      value={cond.megamatch_same_rate}
+                      onChange={(v) => handleRankChange(rank, 'megamatch_same_rate', v)}
                     />
                     <FieldInput
                       label="メガマッチ上位率 (%)"
-                      value={cond.mega_match_upper_rate}
-                      onChange={(v) =>
-                        handleRankChange(rank, 'mega_match_upper_rate', v)
-                      }
+                      value={cond.megamatch_upper_rate}
+                      onChange={(v) => handleRankChange(rank, 'megamatch_upper_rate', v)}
                     />
                     <FieldInput
                       label="プール分配率 (%)"
                       value={cond.pool_distribution_rate}
-                      onChange={(v) =>
-                        handleRankChange(rank, 'pool_distribution_rate', v)
-                      }
+                      onChange={(v) => handleRankChange(rank, 'pool_distribution_rate', v)}
                     />
                     <FieldInput
                       label="プール拠出率 (%)"
                       value={cond.pool_contribution_rate}
-                      onChange={(v) =>
-                        handleRankChange(rank, 'pool_contribution_rate', v)
-                      }
+                      onChange={(v) => handleRankChange(rank, 'pool_contribution_rate', v)}
                     />
                   </div>
                 </div>
@@ -268,21 +243,18 @@ export default function Settings() {
           </div>
         )}
 
-        {/* ユニレベル率タブ */}
         {activeTab === 'unilevel' && (
           <div className="bg-white rounded-xl shadow-sm p-6">
             <h3 className="text-base font-semibold text-gray-700 mb-4">
               ユニレベル率
             </h3>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 text-sm">
-              {(
-                ['level1', 'level2', 'level3', 'level4'] as (keyof UnilevelRates)[]
-              ).map((level) => (
+              {unilevelRates.map((ur) => (
                 <FieldInput
-                  key={level}
-                  label={`レベル${level.replace('level', '')} (%)`}
-                  value={settings.unilevel_rates[level]}
-                  onChange={(v) => handleUnilevelChange(level, v)}
+                  key={ur.level}
+                  label={`レベル${ur.level} (%)`}
+                  value={ur.rate}
+                  onChange={(v) => handleUnilevelChange(ur.level, v)}
                 />
               ))}
             </div>

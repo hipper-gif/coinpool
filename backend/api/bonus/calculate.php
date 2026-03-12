@@ -13,11 +13,10 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit();
 }
 
-// 内部呼び出しのみ許可
+// 内部呼び出しまたは管理者のみ許可
 $remoteIp = $_SERVER['REMOTE_ADDR'] ?? '';
 $allowedIps = ['127.0.0.1', '::1', $_SERVER['SERVER_ADDR'] ?? ''];
 if (!in_array($remoteIp, $allowedIps, true)) {
-    // セッション認証がある場合は管理者も許可
     if (!isset($_SESSION['user_id'])) {
         http_response_code(403);
         echo json_encode(['error' => 'アクセスが拒否されました']);
@@ -25,12 +24,13 @@ if (!in_array($remoteIp, $allowedIps, true)) {
     }
 }
 
-$input      = json_decode(file_get_contents('php://input'), true);
+$input        = json_decode(file_get_contents('php://input'), true);
 $targetUserId = isset($input['user_id']) && $input['user_id'] !== null
               ? (int)$input['user_id'] : null;
 
 try {
     $pdo = getDB();
+    $pdo->beginTransaction();
 
     // ---------------------------------------------------------------
     // マスターデータを一括取得
@@ -43,7 +43,6 @@ try {
     );
     $allUsers = $stmt->fetchAll();
 
-    // ユーザーをidキーのマップに変換
     $usersById = [];
     foreach ($allUsers as $u) {
         $usersById[(int)$u['id']] = [
@@ -65,7 +64,9 @@ try {
 
     // ランク条件（ランクをキーに）
     $stmt = $pdo->query(
-        'SELECT rank, infinity_rate, megamatch_same_rate, megamatch_upper_rate,
+        'SELECT rank, min_investment, min_direct_referrals, min_group_investment,
+                mm_min_investment, mm_min_direct_referrals, mm_min_group_investment,
+                infinity_rate, megamatch_same_rate, megamatch_upper_rate,
                 pool_distribution_rate, pool_contribution_rate
          FROM rank_conditions'
     );
@@ -77,6 +78,9 @@ try {
             'megamatch_upper_rate'   => (float)$rc['megamatch_upper_rate'],
             'pool_distribution_rate' => (float)$rc['pool_distribution_rate'],
             'pool_contribution_rate' => (float)$rc['pool_contribution_rate'],
+            'mm_min_investment'       => (float)$rc['mm_min_investment'],
+            'mm_min_direct_referrals' => (int)$rc['mm_min_direct_referrals'],
+            'mm_min_group_investment' => (float)$rc['mm_min_group_investment'],
         ];
     }
 
@@ -87,10 +91,14 @@ try {
         $unilevelRates[(int)$ur['level']] = (float)$ur['rate'];
     }
 
-    // プール残高
-    $stmt       = $pdo->query('SELECT id, balance FROM pool_balance ORDER BY id ASC LIMIT 1');
+    // 手数料テーブル（プール原資計算用）
+    $stmt = $pdo->query('SELECT min_amount, max_amount, affiliate_fee_rate FROM fee_table ORDER BY min_amount ASC');
+    $feeTable = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // プール残高（FOR UPDATE でロック）
+    $stmt       = $pdo->query('SELECT id, balance FROM pool_balance ORDER BY id ASC LIMIT 1 FOR UPDATE');
     $poolRecord = $stmt->fetch();
-    $poolBalance = $poolRecord ? (float)$poolRecord['balance'] : 0.0;
+    $poolBalance  = $poolRecord ? (float)$poolRecord['balance'] : 0.0;
     $poolRecordId = $poolRecord ? (int)$poolRecord['id'] : null;
 
     // 基準収益率 5%
@@ -104,10 +112,10 @@ try {
         : array_keys($usersById);
 
     // ---------------------------------------------------------------
-    // ボーナス蓄積配列を初期化
+    // ボーナス蓄積配列を初期化（全ユーザー分。メガマッチ控除のため）
     // ---------------------------------------------------------------
     $bonuses = [];
-    foreach ($targetIds as $uid) {
+    foreach (array_keys($usersById) as $uid) {
         $bonuses[$uid] = [
             'unilevel_bonus'  => 0.0,
             'infinity_bonus'  => 0.0,
@@ -119,164 +127,182 @@ try {
     // ---------------------------------------------------------------
     // ヘルパー関数群
     // ---------------------------------------------------------------
+    $rankOrder = ['none' => 0, 'bronze' => 1, 'silver' => 2, 'gold' => 3, 'platinum' => 4, 'diamond' => 5];
 
     /**
-     * 再帰的に傘下全員のIDを取得する
+     * 再帰的に傘下全員のIDを取得する（循環検出付き）
      */
-    function getDescendants(int $userId, array $childrenMap): array
+    function getDescendants(int $userId, array $childrenMap, array &$visited = []): array
     {
         $result = [];
         if (!empty($childrenMap[$userId])) {
             foreach ($childrenMap[$userId] as $childId) {
+                if (isset($visited[$childId])) continue; // 循環防止
+                $visited[$childId] = true;
                 $result[] = $childId;
-                $result   = array_merge($result, getDescendants($childId, $childrenMap));
+                $result = array_merge($result, getDescendants($childId, $childrenMap, $visited));
             }
         }
         return $result;
     }
 
     /**
-     * 傘下の最高ランクの infinity_rate を再帰的に求める
-     * ランクの強さ順: none < bronze < silver < gold < platinum < diamond
+     * 特定legの最高ランクを返す（直下の子ツリー内）
      */
-    function getMaxDescendantInfinityRate(int $userId, array $childrenMap, array $usersById, array $rankConditions): float
+    function getMaxRankInLeg(int $rootId, array $childrenMap, array $usersById, array $rankOrder): string
     {
-        $rankOrder = ['none' => 0, 'bronze' => 1, 'silver' => 2, 'gold' => 3, 'platinum' => 4, 'diamond' => 5];
-        $maxRate   = 0.0;
-        $maxOrder  = 0;
-
-        if (empty($childrenMap[$userId])) return 0.0;
-
-        foreach ($childrenMap[$userId] as $childId) {
-            if (!isset($usersById[$childId])) continue;
-            $childRank  = $usersById[$childId]['rank'];
-            $childOrder = $rankOrder[$childRank] ?? 0;
-            if ($childRank !== 'none' && $childOrder > $maxOrder) {
-                $maxOrder = $childOrder;
-                $maxRate  = $rankConditions[$childRank]['infinity_rate'] ?? 0.0;
-            }
-            // 再帰
-            $descendantRate = getMaxDescendantInfinityRate($childId, $childrenMap, $usersById, $rankConditions);
-            // descendantRateに対応するorderを取得（再帰内で最大のrateを持つランクを探す）
-            foreach ($rankConditions as $rname => $rdata) {
-                if (abs($rdata['infinity_rate'] - $descendantRate) < 0.0001) {
-                    $rOrder = $rankOrder[$rname] ?? 0;
-                    if ($rOrder > $maxOrder) {
-                        $maxOrder = $rOrder;
-                        $maxRate  = $descendantRate;
-                    }
-                }
-            }
-        }
-        return $maxRate;
-    }
-
-    /**
-     * 傘下の最高ランクを返す
-     */
-    function getMaxDescendantRank(int $userId, array $childrenMap, array $usersById): string
-    {
-        $rankOrder = ['none' => 0, 'bronze' => 1, 'silver' => 2, 'gold' => 3, 'platinum' => 4, 'diamond' => 5];
-        $maxRank   = 'none';
-        $maxOrder  = 0;
-
-        if (empty($childrenMap[$userId])) return 'none';
-
-        foreach ($childrenMap[$userId] as $childId) {
-            if (!isset($usersById[$childId])) continue;
-            $childRank  = $usersById[$childId]['rank'];
-            $childOrder = $rankOrder[$childRank] ?? 0;
-            if ($childOrder > $maxOrder) {
-                $maxOrder = $childOrder;
-                $maxRank  = $childRank;
-            }
-            $descRank  = getMaxDescendantRank($childId, $childrenMap, $usersById);
-            $descOrder = $rankOrder[$descRank] ?? 0;
-            if ($descOrder > $maxOrder) {
-                $maxOrder = $descOrder;
-                $maxRank  = $descRank;
+        $maxRank  = $usersById[$rootId]['rank'] ?? 'none';
+        $maxOrder = $rankOrder[$maxRank] ?? 0;
+        $visited = [$rootId => true];
+        $descendants = getDescendants($rootId, $childrenMap, $visited);
+        foreach ($descendants as $did) {
+            if (!isset($usersById[$did])) continue;
+            $r = $usersById[$did]['rank'] ?? 'none';
+            $o = $rankOrder[$r] ?? 0;
+            if ($o > $maxOrder) {
+                $maxOrder = $o;
+                $maxRank  = $r;
             }
         }
         return $maxRank;
     }
 
+    /**
+     * 特定legの投資額合計を返す
+     */
+    function getLegInvestment(int $rootId, array $childrenMap, array $usersById): float
+    {
+        $total = $usersById[$rootId]['investment_amount'] ?? 0;
+        $visited = [$rootId => true];
+        $descendants = getDescendants($rootId, $childrenMap, $visited);
+        foreach ($descendants as $did) {
+            $total += $usersById[$did]['investment_amount'] ?? 0;
+        }
+        return $total;
+    }
+
+    /**
+     * 手数料テーブルからアフィリエイト報酬率を取得
+     */
+    function getAffiliateFeeRate(float $investment, array $feeTable): float
+    {
+        foreach ($feeTable as $row) {
+            $min = (float)$row['min_amount'];
+            $max = $row['max_amount'] !== null ? (float)$row['max_amount'] : PHP_FLOAT_MAX;
+            if ($investment >= $min && $investment <= $max) {
+                return (float)$row['affiliate_fee_rate'];
+            }
+        }
+        return 5.0; // デフォルト最低ライン
+    }
+
+    /**
+     * メガマッチ資格チェック（インフィニティとは別条件）
+     */
+    function isMegaMatchQualified(int $userId, array $usersById, array $childrenMap, array $rankConditions): bool
+    {
+        $user = $usersById[$userId];
+        $rank = $user['rank'];
+        if ($rank === 'none' || !isset($rankConditions[$rank])) return false;
+
+        $rc = $rankConditions[$rank];
+
+        // 本人運用額チェック
+        if ($user['investment_amount'] < $rc['mm_min_investment']) return false;
+
+        // 直紹介数チェック
+        $directCount = count($childrenMap[$userId] ?? []);
+        if ($directCount < $rc['mm_min_direct_referrals']) return false;
+
+        // グループ運用額チェック
+        $visited = [$userId => true];
+        $descendants = getDescendants($userId, $childrenMap, $visited);
+        $groupInvestment = 0;
+        foreach ($descendants as $did) {
+            $groupInvestment += $usersById[$did]['investment_amount'] ?? 0;
+        }
+        if ($groupInvestment < $rc['mm_min_group_investment']) return false;
+
+        return true;
+    }
+
     // ---------------------------------------------------------------
     // 1. ユニレベルボーナス計算
     // ---------------------------------------------------------------
-    // 対象ユーザーの investment_amount × unilevel_rates[level].rate / 100
-    // を上位4段の紹介者に加算する
-    foreach ($targetIds as $uid) {
-        if (!isset($usersById[$uid])) continue;
+    foreach (array_keys($usersById) as $uid) {
         $investAmt = $usersById[$uid]['investment_amount'];
         if ($investAmt <= 0) continue;
 
         $currentId = $uid;
         for ($level = 1; $level <= 4; $level++) {
             $parentId = $usersById[$currentId]['referrer_id'] ?? null;
-            if ($parentId === null) break;
+            if ($parentId === null || !isset($usersById[$parentId])) break;
 
             $rate = $unilevelRates[$level] ?? 0.0;
             $unilevelBonus = $investAmt * ($rate / 100);
-
-            // 上位ユーザーが計算対象に含まれていれば加算
-            if (isset($bonuses[$parentId])) {
-                $bonuses[$parentId]['unilevel_bonus'] += $unilevelBonus;
-            } elseif ($targetUserId === null) {
-                // 全員計算モードで未初期化の場合（対象外のユーザー）はスキップ
-            }
+            $bonuses[$parentId]['unilevel_bonus'] += $unilevelBonus;
 
             $currentId = $parentId;
-            if (!isset($usersById[$currentId])) break;
         }
     }
 
     // ---------------------------------------------------------------
-    // 2. インフィニティボーナス計算（差額還元方式）
+    // 2. インフィニティボーナス計算（差額還元方式・系列別）
     // ---------------------------------------------------------------
-    // 組織全体の発生収益 = 全ユーザーの investment_amount 合計 × BASE_YIELD_RATE
-    $totalInvestment    = array_sum(array_column($usersById, 'investment_amount'));
-    $orgTotalRevenue    = $totalInvestment * $BASE_YIELD_RATE;
-
-    foreach ($targetIds as $uid) {
-        if (!isset($usersById[$uid])) continue;
+    foreach (array_keys($usersById) as $uid) {
         $userRank = $usersById[$uid]['rank'];
         if ($userRank === 'none') continue;
 
-        $myInfinityRate  = $rankConditions[$userRank]['infinity_rate'] ?? 0.0;
-        $maxDescRate     = getMaxDescendantInfinityRate($uid, $childrenMap, $usersById, $rankConditions);
-        $diffRate        = $myInfinityRate - $maxDescRate;
+        $myInfinityRate = $rankConditions[$userRank]['infinity_rate'] ?? 0.0;
+        $directChildren = $childrenMap[$uid] ?? [];
 
-        if ($diffRate > 0) {
-            $bonuses[$uid]['infinity_bonus'] += $orgTotalRevenue * ($diffRate / 100);
+        foreach ($directChildren as $childId) {
+            if (!isset($usersById[$childId])) continue;
+
+            // この系列（leg）内の最高ランクを取得
+            $legMaxRank = getMaxRankInLeg($childId, $childrenMap, $usersById, $rankOrder);
+            $legMaxRate = ($legMaxRank !== 'none' && isset($rankConditions[$legMaxRank]))
+                ? $rankConditions[$legMaxRank]['infinity_rate']
+                : 0.0;
+
+            $diffRate = $myInfinityRate - $legMaxRate;
+            if ($diffRate <= 0) continue; // 同ランク以上がいる系列は0
+
+            // この系列の収益
+            $legInvestment = getLegInvestment($childId, $childrenMap, $usersById);
+            $legRevenue    = $legInvestment * $BASE_YIELD_RATE;
+
+            $bonuses[$uid]['infinity_bonus'] += $legRevenue * ($diffRate / 100);
         }
     }
 
     // ---------------------------------------------------------------
     // 3. メガマッチタイトルボーナス計算
     // ---------------------------------------------------------------
-    // 事前にユニレベル+インフィニティの合計を計算
+    // 事前にユニレベル+インフィニティの合計を全員分計算
     $subTotals = [];
-    foreach ($targetIds as $uid) {
+    foreach (array_keys($usersById) as $uid) {
         $subTotals[$uid] = $bonuses[$uid]['unilevel_bonus'] + $bonuses[$uid]['infinity_bonus'];
     }
 
-    $rankOrder = ['none' => 0, 'bronze' => 1, 'silver' => 2, 'gold' => 3, 'platinum' => 4, 'diamond' => 5];
-
-    foreach ($targetIds as $uid) {
-        if (!isset($usersById[$uid])) continue;
-        $userRank  = $usersById[$uid]['rank'];
+    foreach (array_keys($usersById) as $uid) {
+        $userRank = $usersById[$uid]['rank'];
         if ($userRank === 'none') continue;
+
+        // メガマッチ専用資格チェック
+        if (!isMegaMatchQualified($uid, $usersById, $childrenMap, $rankConditions)) continue;
+
         $userOrder = $rankOrder[$userRank];
 
         // 傘下の全メンバーをチェック
-        $descendants = getDescendants($uid, $childrenMap);
+        $visited = [$uid => true];
+        $descendants = getDescendants($uid, $childrenMap, $visited);
         foreach ($descendants as $descId) {
             if (!isset($usersById[$descId])) continue;
-            $descRank  = $usersById[$descId]['rank'];
+            $descRank = $usersById[$descId]['rank'];
             if ($descRank === 'none') continue;
             $descOrder = $rankOrder[$descRank];
 
-            // 傘下の報酬合計
             $descSubTotal = $subTotals[$descId] ?? 0.0;
             if ($descSubTotal <= 0) continue;
 
@@ -292,56 +318,113 @@ try {
                 $megamatchBonus = $descSubTotal * ($rate / 100);
             }
 
-            if (isset($bonuses[$uid])) {
+            if ($megamatchBonus > 0) {
                 $bonuses[$uid]['megamatch_bonus'] += $megamatchBonus;
+
+                // 対象メンバーの報酬から控除（PDF仕様: 原資は対象者の報酬）
+                if ($descSubTotal > 0) {
+                    $uniRatio = $bonuses[$descId]['unilevel_bonus'] / $descSubTotal;
+                    $infRatio = $bonuses[$descId]['infinity_bonus'] / $descSubTotal;
+                    $bonuses[$descId]['unilevel_bonus']  -= $megamatchBonus * $uniRatio;
+                    $bonuses[$descId]['infinity_bonus']  -= $megamatchBonus * $infRatio;
+                }
             }
         }
     }
 
+    // メガマッチ控除で負になった場合は0にクランプ
+    foreach ($bonuses as $uid => &$b) {
+        $b['unilevel_bonus']  = max(0, $b['unilevel_bonus']);
+        $b['infinity_bonus']  = max(0, $b['infinity_bonus']);
+    }
+    unset($b);
+
     // ---------------------------------------------------------------
-    // 4. プールボーナス計算
+    // 4. プールボーナス計算（30%分配 / 70%繰越）
     // ---------------------------------------------------------------
-    // プール有資格者（noneでないユーザー）を特定
-    $poolEligibleIds = [];
-    foreach ($targetIds as $uid) {
-        if (!isset($usersById[$uid])) continue;
-        if ($usersById[$uid]['rank'] !== 'none') {
-            $poolEligibleIds[] = $uid;
+
+    // 4a. プール分配（残高の30%をランク階層別に分配）
+    $distributablePool = $poolBalance * 0.30;
+    $totalDistributed  = 0.0;
+
+    if ($distributablePool > 0 && $targetUserId === null) {
+        // ランク別にユーザーをグループ化
+        $usersByRank = [];
+        foreach (array_keys($usersById) as $uid) {
+            $r = $usersById[$uid]['rank'];
+            if ($r === 'none') continue;
+            $usersByRank[$r][] = $uid;
+        }
+
+        // 各ティアの分配定義（PDFの30%内訳: 2+3+5+7.5+12.5=30）
+        $tiers = [
+            'bronze'   => ['rate' => 2.0  / 30.0, 'eligible' => ['bronze','silver','gold','platinum','diamond']],
+            'silver'   => ['rate' => 3.0  / 30.0, 'eligible' => ['silver','gold','platinum','diamond']],
+            'gold'     => ['rate' => 5.0  / 30.0, 'eligible' => ['gold','platinum','diamond']],
+            'platinum' => ['rate' => 7.5  / 30.0, 'eligible' => ['platinum','diamond']],
+            'diamond'  => ['rate' => 12.5 / 30.0, 'eligible' => ['diamond']],
+        ];
+
+        foreach ($tiers as $tierRank => $tierDef) {
+            $tierPool = $distributablePool * $tierDef['rate'];
+
+            // このティアの有資格者を集める
+            $eligibleForTier = [];
+            foreach ($tierDef['eligible'] as $eligRank) {
+                if (isset($usersByRank[$eligRank])) {
+                    $eligibleForTier = array_merge($eligibleForTier, $usersByRank[$eligRank]);
+                }
+            }
+
+            if (empty($eligibleForTier)) continue;
+
+            $perPerson = $tierPool / count($eligibleForTier);
+            foreach ($eligibleForTier as $uid) {
+                $bonuses[$uid]['pool_bonus'] += $perPerson;
+            }
+            $totalDistributed += $tierPool;
         }
     }
 
-    if (!empty($poolEligibleIds) && $poolBalance > 0) {
-        $eligibleCount = count($poolEligibleIds);
-
-        foreach ($poolEligibleIds as $uid) {
-            $userRank = $usersById[$uid]['rank'];
-            $distRate = $rankConditions[$userRank]['pool_distribution_rate'] ?? 0.0;
-            // 均等分配: pool_balance × distribution_rate / 100 / 有資格者数
-            $bonuses[$uid]['pool_bonus'] += ($poolBalance * ($distRate / 100)) / $eligibleCount;
-        }
-    }
-
-    // プールへの拠出計算（ボーナス合計の contribution_rate% を積み上げ）
-    $poolContribution = 0.0;
-    foreach ($poolEligibleIds as $uid) {
-        $userRank    = $usersById[$uid]['rank'];
+    // 4b. プール拠出計算
+    // (1) メンバー報酬からの拠出（unilevel + infinity + megamatch の contribution_rate%）
+    $memberContribution = 0.0;
+    foreach (array_keys($usersById) as $uid) {
+        $userRank = $usersById[$uid]['rank'];
+        if ($userRank === 'none') continue;
         $contribRate = $rankConditions[$userRank]['pool_contribution_rate'] ?? 0.0;
         $totalSoFar  = $bonuses[$uid]['unilevel_bonus']
                      + $bonuses[$uid]['infinity_bonus']
                      + $bonuses[$uid]['megamatch_bonus'];
-        $poolContribution += $totalSoFar * ($contribRate / 100);
+        $memberContribution += $totalSoFar * ($contribRate / 100);
     }
 
-    // プール残高を更新（分配後に拠出を加算）
-    if ($poolRecordId !== null && $poolContribution > 0) {
-        $stmt = $pdo->prepare('UPDATE pool_balance SET balance = balance + ? WHERE id = ?');
-        $stmt->execute([$poolContribution, $poolRecordId]);
+    // (2) 余剰アフィリエイト報酬からの拠出（PRIMARY原資）
+    $feeContribution = 0.0;
+    $BASE_AFFILIATE_RATE = 5.0; // 5%がボーナス原資
+    foreach ($usersById as $uid => $user) {
+        if ($user['investment_amount'] <= 0) continue;
+        $affiliateRate = getAffiliateFeeRate($user['investment_amount'], $feeTable);
+        $excessRate = $affiliateRate - $BASE_AFFILIATE_RATE;
+        if ($excessRate > 0) {
+            $feeContribution += $user['investment_amount'] * ($excessRate / 100);
+        }
+    }
+
+    $poolContribution = $memberContribution + $feeContribution;
+
+    // 4c. プール残高更新（全員計算モードのみ）
+    if ($poolRecordId !== null && $targetUserId === null) {
+        // 新残高 = 旧残高 × 70%（30%は分配済み） + 今回の拠出
+        $newPoolBalance = ($poolBalance * 0.70) + $poolContribution;
+        $stmt = $pdo->prepare('UPDATE pool_balance SET balance = ? WHERE id = ?');
+        $stmt->execute([round($newPoolBalance, 2), $poolRecordId]);
     }
 
     // ---------------------------------------------------------------
     // 5. bonus_snapshots に upsert
     // ---------------------------------------------------------------
-    $stmt = $pdo->prepare(
+    $upsertStmt = $pdo->prepare(
         'INSERT INTO bonus_snapshots
             (user_id, unilevel_bonus, infinity_bonus, megamatch_bonus, pool_bonus, total_bonus, calculated_at)
          VALUES (?, ?, ?, ?, ?, ?, NOW())
@@ -351,66 +434,40 @@ try {
             megamatch_bonus = VALUES(megamatch_bonus),
             pool_bonus      = VALUES(pool_bonus),
             total_bonus     = VALUES(total_bonus),
-            calculated_at   = VALUES(calculated_at)'
+            calculated_at   = NOW()'
     );
 
-    // NOTE: bonus_snapshots には user_id に UNIQUE KEY がないため
-    // 既存レコードがあれば DELETE + INSERT で代替する方式を使う
-    $upsertStmt = $pdo->prepare(
-        'SELECT id FROM bonus_snapshots WHERE user_id = ? ORDER BY calculated_at DESC LIMIT 1'
-    );
-    $updateStmt = $pdo->prepare(
-        'UPDATE bonus_snapshots SET
-            unilevel_bonus  = ?,
-            infinity_bonus  = ?,
-            megamatch_bonus = ?,
-            pool_bonus      = ?,
-            total_bonus     = ?,
-            calculated_at   = NOW()
-         WHERE user_id = ?
-         ORDER BY calculated_at DESC
-         LIMIT 1'
-    );
-    $insertStmt = $pdo->prepare(
-        'INSERT INTO bonus_snapshots
-            (user_id, unilevel_bonus, infinity_bonus, megamatch_bonus, pool_bonus, total_bonus, calculated_at)
-         VALUES (?, ?, ?, ?, ?, ?, NOW())'
-    );
-
-    foreach ($bonuses as $uid => $b) {
+    $savedCount = 0;
+    foreach ($targetIds as $uid) {
+        if (!isset($bonuses[$uid])) continue;
+        $b     = $bonuses[$uid];
         $total = $b['unilevel_bonus'] + $b['infinity_bonus'] + $b['megamatch_bonus'] + $b['pool_bonus'];
 
-        $upsertStmt->execute([$uid]);
-        $existing = $upsertStmt->fetch();
-
-        if ($existing) {
-            $updateStmt->execute([
-                round($b['unilevel_bonus'],  2),
-                round($b['infinity_bonus'],  2),
-                round($b['megamatch_bonus'], 2),
-                round($b['pool_bonus'],      2),
-                round($total,                2),
-                $uid,
-            ]);
-        } else {
-            $insertStmt->execute([
-                $uid,
-                round($b['unilevel_bonus'],  2),
-                round($b['infinity_bonus'],  2),
-                round($b['megamatch_bonus'], 2),
-                round($b['pool_bonus'],      2),
-                round($total,                2),
-            ]);
-        }
+        $upsertStmt->execute([
+            $uid,
+            round($b['unilevel_bonus'],  2),
+            round($b['infinity_bonus'],  2),
+            round($b['megamatch_bonus'], 2),
+            round($b['pool_bonus'],      2),
+            round($total,                2),
+        ]);
+        $savedCount++;
     }
 
+    $pdo->commit();
+
     echo json_encode([
-        'message'       => 'ボーナス計算が完了しました',
-        'calculated'    => count($bonuses),
-        'pool_contribution_added' => round($poolContribution, 2),
+        'message'              => 'ボーナス計算が完了しました',
+        'calculated'           => $savedCount,
+        'pool_distributed'     => round($totalDistributed, 2),
+        'pool_member_contrib'  => round($memberContribution, 2),
+        'pool_fee_contrib'     => round($feeContribution, 2),
     ]);
 
 } catch (PDOException $e) {
+    if (isset($pdo) && $pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
     http_response_code(500);
     echo json_encode(['error' => 'サーバーエラーが発生しました: ' . $e->getMessage()]);
 }

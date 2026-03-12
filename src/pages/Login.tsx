@@ -43,10 +43,10 @@ export default function Login() {
         err instanceof Error ? err.message : 'ログインに失敗しました。';
       // axiosエラーからサーバーメッセージを取得
       const axiosErr = err as {
-        response?: { data?: { message?: string } };
+        response?: { data?: { error?: string } };
       };
       setError(
-        axiosErr?.response?.data?.message ??
+        axiosErr?.response?.data?.error ??
           message ??
           'メールアドレスまたはパスワードが正しくありません。'
       );
@@ -60,6 +60,7 @@ export default function Login() {
       <div className="bg-white rounded-2xl shadow-md w-full max-w-sm p-8">
         {/* ロゴ */}
         <div className="text-center mb-8">
+          <img src="/coinpool/logo.png" alt="CoinPool" className="w-16 h-16 mx-auto mb-3 rounded-xl" />
           <h1 className="text-2xl font-bold text-gray-900">CoinPool</h1>
           <p className="text-sm text-gray-500 mt-1">配当管理システム</p>
         </div>

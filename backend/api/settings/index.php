@@ -20,6 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
         $stmt = $pdo->query(
             'SELECT rank, min_investment, min_direct_referrals, min_group_investment,
+                    mm_min_investment, mm_min_direct_referrals, mm_min_group_investment,
                     infinity_rate, megamatch_same_rate, megamatch_upper_rate,
                     pool_distribution_rate, pool_contribution_rate
              FROM rank_conditions
@@ -33,15 +34,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         // 数値型に変換
         $rankConditions = array_map(function ($rc) {
             return [
-                'rank'                  => $rc['rank'],
-                'min_investment'        => (float)$rc['min_investment'],
-                'min_direct_referrals'  => (int)$rc['min_direct_referrals'],
-                'min_group_investment'  => (float)$rc['min_group_investment'],
-                'infinity_rate'         => (float)$rc['infinity_rate'],
-                'megamatch_same_rate'   => (float)$rc['megamatch_same_rate'],
-                'megamatch_upper_rate'  => (float)$rc['megamatch_upper_rate'],
-                'pool_distribution_rate'=> (float)$rc['pool_distribution_rate'],
-                'pool_contribution_rate'=> (float)$rc['pool_contribution_rate'],
+                'rank'                    => $rc['rank'],
+                'min_investment'          => (float)$rc['min_investment'],
+                'min_direct_referrals'    => (int)$rc['min_direct_referrals'],
+                'min_group_investment'    => (float)$rc['min_group_investment'],
+                'mm_min_investment'       => (float)$rc['mm_min_investment'],
+                'mm_min_direct_referrals' => (int)$rc['mm_min_direct_referrals'],
+                'mm_min_group_investment' => (float)$rc['mm_min_group_investment'],
+                'infinity_rate'           => (float)$rc['infinity_rate'],
+                'megamatch_same_rate'     => (float)$rc['megamatch_same_rate'],
+                'megamatch_upper_rate'    => (float)$rc['megamatch_upper_rate'],
+                'pool_distribution_rate'  => (float)$rc['pool_distribution_rate'],
+                'pool_contribution_rate'  => (float)$rc['pool_contribution_rate'],
             ];
         }, $rankConditions);
 
@@ -69,7 +73,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 // ---------------------------------------------------------------
 if ($_SERVER['REQUEST_METHOD'] === 'PUT') {
     // PUT は管理者のみ
-    if ($currentUser['role'] !== 'admin') {
+    if (!in_array($currentUser['role'], ['root', 'admin'])) {
         http_response_code(403);
         echo json_encode(['error' => '管理者権限が必要です']);
         exit();
@@ -94,6 +98,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'PUT') {
                     min_investment         = ?,
                     min_direct_referrals   = ?,
                     min_group_investment   = ?,
+                    mm_min_investment      = ?,
+                    mm_min_direct_referrals = ?,
+                    mm_min_group_investment = ?,
                     infinity_rate          = ?,
                     megamatch_same_rate    = ?,
                     megamatch_upper_rate   = ?,
@@ -104,14 +111,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'PUT') {
             foreach ($input['rank_conditions'] as $rc) {
                 if (empty($rc['rank'])) continue;
                 $stmt->execute([
-                    (float)($rc['min_investment']        ?? 0),
-                    (int)  ($rc['min_direct_referrals']  ?? 0),
-                    (float)($rc['min_group_investment']  ?? 0),
-                    (float)($rc['infinity_rate']         ?? 0),
-                    (float)($rc['megamatch_same_rate']   ?? 0),
-                    (float)($rc['megamatch_upper_rate']  ?? 0),
-                    (float)($rc['pool_distribution_rate']?? 0),
-                    (float)($rc['pool_contribution_rate']?? 0),
+                    (float)($rc['min_investment']          ?? 0),
+                    (int)  ($rc['min_direct_referrals']    ?? 0),
+                    (float)($rc['min_group_investment']    ?? 0),
+                    (float)($rc['mm_min_investment']       ?? 0),
+                    (int)  ($rc['mm_min_direct_referrals'] ?? 0),
+                    (float)($rc['mm_min_group_investment'] ?? 0),
+                    (float)($rc['infinity_rate']           ?? 0),
+                    (float)($rc['megamatch_same_rate']     ?? 0),
+                    (float)($rc['megamatch_upper_rate']    ?? 0),
+                    (float)($rc['pool_distribution_rate']  ?? 0),
+                    (float)($rc['pool_contribution_rate']  ?? 0),
                     $rc['rank'],
                 ]);
             }

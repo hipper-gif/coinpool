@@ -15,6 +15,9 @@ dist-ssr
 # PHP credentials
 backend/config/database.php
 
+# SSH keys
+*.key
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

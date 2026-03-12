@@ -32,7 +32,7 @@ if (!$currentUser) {
     exit();
 }
 
-if (!empty($requireAdmin) && $currentUser['role'] !== 'admin') {
+if (!empty($requireAdmin) && !in_array($currentUser['role'], ['root', 'admin'])) {
     http_response_code(403);
     echo json_encode(['error' => '管理者権限が必要です']);
     exit();

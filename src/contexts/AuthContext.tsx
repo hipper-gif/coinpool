@@ -8,7 +8,7 @@ import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../api/axios';
 
-export type UserRole = 'admin' | 'member';
+export type UserRole = 'root' | 'admin' | 'member';
 
 export interface User {
   id: number;
@@ -22,6 +22,7 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  updateUser: (updates: Partial<User>) => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -48,6 +49,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(res.data);
   };
 
+  const updateUser = (updates: Partial<User>): void => {
+    setUser((prev) => (prev ? { ...prev, ...updates } : prev));
+  };
+
   const logout = async (): Promise<void> => {
     try {
       await apiClient.post('/auth/logout.php');
@@ -58,7 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

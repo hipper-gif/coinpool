@@ -1,11 +1,24 @@
-import { useEffect, useState, useCallback } from 'react';
-import { useAuth } from '../../contexts/AuthContext';
+import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import apiClient from '../../api/axios';
-import type { Rank } from './Dashboard';
+import type { Rank } from '../member/Dashboard';
 
 // ---------------------------------------------------------------
 // 型定義
 // ---------------------------------------------------------------
+
+interface MemberRaw {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+  rank: Rank;
+  investment_amount: number;
+  direct_referral_count: number;
+  group_investment: number;
+  referrer_id: number | null;
+  referrer_name: string | null;
+}
 
 interface MemberNode {
   id: number;
@@ -14,20 +27,6 @@ interface MemberNode {
   investment_amount: number;
   children: MemberNode[];
   depth: number;
-}
-
-interface MemberShowResponse {
-  id: number;
-  name: string;
-  rank: Rank;
-  investment_amount: number;
-  direct_referrals: {
-    id: number;
-    name: string;
-    email: string;
-    rank: Rank;
-    investment_amount: number;
-  }[];
 }
 
 interface UnilevelRate {
@@ -51,8 +50,6 @@ interface RatesResponse {
 // ---------------------------------------------------------------
 // 定数
 // ---------------------------------------------------------------
-
-const MAX_DEPTH = 4;
 
 const RANK_LABEL: Record<Rank, string> = {
   none: 'なし',
@@ -85,25 +82,42 @@ const RANK_BORDER: Record<Rank, string> = {
 // ヘルパー
 // ---------------------------------------------------------------
 
-async function fetchNode(id: number, depth: number): Promise<MemberNode> {
-  const res = await apiClient.get<MemberShowResponse>(`/members/show.php?id=${id}`);
-  const data = res.data;
+function buildTree(members: MemberRaw[]): MemberNode[] {
+  const filtered = members.filter((m) => m.role !== 'root');
 
-  let children: MemberNode[] = [];
-  if (depth < MAX_DEPTH && data.direct_referrals.length > 0) {
-    children = await Promise.all(
-      data.direct_referrals.map((child) => fetchNode(child.id, depth + 1)),
-    );
+  const nodeMap = new Map<number, MemberNode>();
+  for (const m of filtered) {
+    nodeMap.set(m.id, {
+      id: m.id,
+      name: m.name,
+      rank: m.rank,
+      investment_amount: m.investment_amount,
+      children: [],
+      depth: 1,
+    });
   }
 
-  return {
-    id: data.id,
-    name: data.name,
-    rank: data.rank,
-    investment_amount: data.investment_amount,
-    children,
-    depth,
-  };
+  const roots: MemberNode[] = [];
+  for (const m of filtered) {
+    const node = nodeMap.get(m.id);
+    if (!node) continue;
+    if (m.referrer_id === null || !nodeMap.has(m.referrer_id)) {
+      roots.push(node);
+    } else {
+      const parent = nodeMap.get(m.referrer_id);
+      if (parent) parent.children.push(node);
+    }
+  }
+
+  function setDepths(nodes: MemberNode[], depth: number) {
+    for (const n of nodes) {
+      n.depth = depth;
+      setDepths(n.children, depth + 1);
+    }
+  }
+  setDepths(roots, 1);
+
+  return roots;
 }
 
 function formatCurrency(value: number): string {
@@ -118,14 +132,6 @@ function countDescendants(node: MemberNode): number {
   return count;
 }
 
-function collectIds(node: MemberNode): number[] {
-  const ids: number[] = [node.id];
-  for (const child of node.children) {
-    ids.push(...collectIds(child));
-  }
-  return ids;
-}
-
 // ---------------------------------------------------------------
 // ツリーノード
 // ---------------------------------------------------------------
@@ -135,6 +141,7 @@ interface TreeNodeProps {
   isRoot?: boolean;
   expandedMap: Map<number, boolean>;
   onToggle: (id: number) => void;
+  onNodeClick: (id: number) => void;
   unilevelRates: UnilevelRate[];
   rankConditions: Record<string, RankRates>;
 }
@@ -144,17 +151,22 @@ function TreeNode({
   isRoot = false,
   expandedMap,
   onToggle,
+  onNodeClick,
   unilevelRates,
   rankConditions,
 }: TreeNodeProps) {
   const hasChildren = node.children.length > 0;
   const isExpanded = expandedMap.get(node.id) ?? false;
 
+  // ユニレベル率（この深さのレベルに対応）
   const unilevelRate = unilevelRates.find((r) => r.level === node.depth);
+
+  // ランクボーナス率
   const rankRates = node.rank !== 'none' ? rankConditions[node.rank] : null;
 
   return (
     <div className={isRoot ? '' : 'relative'}>
+      {/* 接続線（ルート以外） */}
       {!isRoot && (
         <div className="absolute -left-4 top-0 bottom-0 w-px bg-gray-200" />
       )}
@@ -199,7 +211,8 @@ function TreeNode({
             </button>
 
             <div
-              className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${
+              onClick={() => onNodeClick(node.id)}
+              className={`flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold cursor-pointer ${
                 isRoot
                   ? 'bg-indigo-500 text-white'
                   : 'bg-gray-100 text-gray-600'
@@ -208,12 +221,13 @@ function TreeNode({
               {node.name.charAt(0)}
             </div>
 
-            <span className="font-semibold text-gray-800 text-sm truncate min-w-0">
+            <span
+              className="font-semibold text-gray-800 text-sm truncate min-w-0 cursor-pointer"
+              onClick={() => onNodeClick(node.id)}
+            >
               {node.name}
             </span>
-            {isRoot && (
-              <span className="flex-shrink-0 text-[10px] text-indigo-500 font-medium whitespace-nowrap">（自分）</span>
-            )}
+
             <span
               className={`flex-shrink-0 text-[10px] font-bold px-1.5 py-0.5 rounded-full whitespace-nowrap ${RANK_BADGE_CLASS[node.rank ?? 'none']}`}
             >
@@ -247,7 +261,7 @@ function TreeNode({
           </div>
         </div>
 
-        {/* 詳細率情報（ランクあり & 展開時） */}
+        {/* 詳細率情報（ランクありの場合、展開時のみ） */}
         {rankRates && isExpanded && (
           <div className="px-3 pb-2.5 pt-0 sm:px-4">
             <div className="flex flex-wrap gap-1.5 ml-[52px]">
@@ -277,6 +291,7 @@ function TreeNode({
               node={child}
               expandedMap={expandedMap}
               onToggle={onToggle}
+              onNodeClick={onNodeClick}
               unilevelRates={unilevelRates}
               rankConditions={rankConditions}
             />
@@ -291,38 +306,46 @@ function TreeNode({
 // メインコンポーネント
 // ---------------------------------------------------------------
 
-export default function Organization() {
-  const { user } = useAuth();
-  const [tree, setTree] = useState<MemberNode | null>(null);
+export default function AdminOrganization() {
+  const navigate = useNavigate();
+  const [trees, setTrees] = useState<MemberNode[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedMap, setExpandedMap] = useState<Map<number, boolean>>(new Map());
   const [unilevelRates, setUnilevelRates] = useState<UnilevelRate[]>([]);
   const [rankConditions, setRankConditions] = useState<Record<string, RankRates>>({});
 
-  const collectAllIds = useCallback((node: MemberNode | null): number[] => {
-    if (!node) return [];
-    return collectIds(node);
+  // 全ノードIDを収集
+  const collectIds = useCallback((nodes: MemberNode[]): number[] => {
+    const ids: number[] = [];
+    for (const n of nodes) {
+      ids.push(n.id);
+      ids.push(...collectIds(n.children));
+    }
+    return ids;
   }, []);
 
   useEffect(() => {
-    if (!user) return;
-
-    const build = async () => {
+    const fetchAll = async () => {
       setLoading(true);
       setError(null);
       try {
-        const [root, ratesRes] = await Promise.all([
-          fetchNode(user.id, 1),
+        const [membersRes, ratesRes] = await Promise.all([
+          apiClient.get<MemberRaw[]>('/members/index.php'),
           apiClient.get<RatesResponse>('/settings/rates.php'),
         ]);
-        setTree(root);
+
+        const roots = buildTree(membersRes.data ?? []);
+        setTrees(roots);
+
         setUnilevelRates(ratesRes.data.unilevel_rates);
         setRankConditions(ratesRes.data.rank_conditions);
 
-        // デフォルト: ルートを展開
+        // デフォルト: ルートノードのみ展開
         const initialMap = new Map<number, boolean>();
-        initialMap.set(root.id, true);
+        for (const root of roots) {
+          initialMap.set(root.id, true);
+        }
         setExpandedMap(initialMap);
       } catch {
         setError('組織ツリーの取得に失敗しました。');
@@ -331,8 +354,8 @@ export default function Organization() {
       }
     };
 
-    void build();
-  }, [user]);
+    void fetchAll();
+  }, []);
 
   const handleToggle = (id: number) => {
     setExpandedMap((prev) => {
@@ -343,7 +366,7 @@ export default function Organization() {
   };
 
   const handleExpandAll = () => {
-    const allIds = collectAllIds(tree);
+    const allIds = collectIds(trees);
     const next = new Map<number, boolean>();
     for (const id of allIds) next.set(id, true);
     setExpandedMap(next);
@@ -351,6 +374,10 @@ export default function Organization() {
 
   const handleCollapseAll = () => {
     setExpandedMap(new Map());
+  };
+
+  const handleNodeClick = (id: number) => {
+    void navigate(`/admin/members/${id}`);
   };
 
   if (loading) {
@@ -370,7 +397,8 @@ export default function Organization() {
     );
   }
 
-  const totalNodes = collectAllIds(tree).length;
+  // 統計
+  const totalNodes = collectIds(trees).length;
 
   return (
     <div className="space-y-4">
@@ -378,7 +406,7 @@ export default function Organization() {
       <div>
         <h2 className="text-2xl font-bold text-gray-800">組織ツリー</h2>
         <p className="text-sm text-gray-500 mt-1">
-          自分を起点とした紹介ネットワークとボーナス権利率（最大{MAX_DEPTH}段）
+          全メンバーの紹介ネットワークとボーナス権利率
         </p>
       </div>
 
@@ -426,15 +454,21 @@ export default function Organization() {
 
       {/* ツリー本体 */}
       <div className="bg-white rounded-xl shadow-sm p-4 sm:p-6 overflow-x-auto">
-        {tree ? (
-          <TreeNode
-            node={tree}
-            isRoot
-            expandedMap={expandedMap}
-            onToggle={handleToggle}
-            unilevelRates={unilevelRates}
-            rankConditions={rankConditions}
-          />
+        {trees.length > 0 ? (
+          <div>
+            {trees.map((root) => (
+              <TreeNode
+                key={root.id}
+                node={root}
+                isRoot
+                expandedMap={expandedMap}
+                onToggle={handleToggle}
+                onNodeClick={handleNodeClick}
+                unilevelRates={unilevelRates}
+                rankConditions={rankConditions}
+              />
+            ))}
+          </div>
         ) : (
           <p className="text-gray-400 text-sm text-center py-8">
             組織データがありません。

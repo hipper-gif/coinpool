@@ -8,8 +8,14 @@ import AdminDashboard from './pages/admin/Dashboard';
 import Members from './pages/admin/Members';
 import MemberDetail from './pages/admin/MemberDetail';
 import Settings from './pages/admin/Settings';
+import AdminOrganization from './pages/admin/Organization';
+import FeeTable from './pages/admin/FeeTable';
+import AdminReports from './pages/admin/Reports';
+import ActivityLog from './pages/admin/ActivityLog';
 import MemberDashboard from './pages/member/Dashboard';
 import Organization from './pages/member/Organization';
+import MemberReports from './pages/member/Reports';
+import Profile from './pages/Profile';
 
 /** ルートパス: ログイン済みならrole別ダッシュボードへ、未ログインなら/loginへ */
 function RootRedirect() {
@@ -28,7 +34,9 @@ function RootRedirect() {
   }
 
   const dashboard =
-    user.role === 'admin' ? '/admin/dashboard' : '/member/dashboard';
+    user.role === 'admin' || user.role === 'root'
+      ? '/admin/dashboard'
+      : '/member/dashboard';
   return <Navigate to={dashboard} replace />;
 }
 
@@ -54,7 +62,12 @@ function AppRoutes() {
         <Route path="dashboard" element={<AdminDashboard />} />
         <Route path="members" element={<Members />} />
         <Route path="members/:id" element={<MemberDetail />} />
+        <Route path="organization" element={<AdminOrganization />} />
+        <Route path="fees" element={<FeeTable />} />
+        <Route path="reports" element={<AdminReports />} />
+        <Route path="activity" element={<ActivityLog />} />
         <Route path="settings" element={<Settings />} />
+        <Route path="profile" element={<Profile />} />
       </Route>
 
       {/* メンバールート */}
@@ -69,6 +82,8 @@ function AppRoutes() {
         <Route index element={<Navigate to="/member/dashboard" replace />} />
         <Route path="dashboard" element={<MemberDashboard />} />
         <Route path="organization" element={<Organization />} />
+        <Route path="reports" element={<MemberReports />} />
+        <Route path="profile" element={<Profile />} />
       </Route>
 
       {/* 未マッチはルートへ */}
@@ -79,7 +94,7 @@ function AppRoutes() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/coinpool">
       <AuthProvider>
         <AppRoutes />
       </AuthProvider>

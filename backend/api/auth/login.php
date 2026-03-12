@@ -11,8 +11,15 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 
 $input = json_decode(file_get_contents('php://input'), true);
+
+if (!is_array($input)) {
+    http_response_code(400);
+    echo json_encode(['error' => '不正なリクエストです']);
+    exit();
+}
+
 $email    = trim($input['email'] ?? '');
-$password = trim($input['password'] ?? '');
+$password = $input['password']   ?? '';
 
 if ($email === '' || $password === '') {
     http_response_code(400);

@@ -54,11 +54,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         // 全ユーザー取得（直紹介数も集計）
         $stmt = $pdo->query(
             'SELECT u.id, u.name, u.email, u.role, u.rank,
-                    u.investment_amount, u.referrer_id,
+                    u.investment_amount, u.referrer_id, u.created_at,
                     r.name AS referrer_name,
-                    (SELECT COUNT(*) FROM users c WHERE c.referrer_id = u.id) AS direct_referral_count
+                    (SELECT COUNT(*) FROM users c WHERE c.referrer_id = u.id) AS direct_referral_count,
+                    COALESCE(bs.total_bonus, 0) AS total_bonus
              FROM users u
              LEFT JOIN users r ON r.id = u.referrer_id
+             LEFT JOIN bonus_snapshots bs ON bs.user_id = u.id
+             WHERE u.role != \'root\'
              ORDER BY u.id ASC'
         );
         $users       = $stmt->fetchAll();
@@ -77,6 +80,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                 'referrer_name'        => $user['referrer_name'],
                 'direct_referral_count'=> (int)$user['direct_referral_count'],
                 'group_investment'     => calcGroupInvestment((int)$user['id'], $childrenMap),
+                'total_bonus'          => (float)$user['total_bonus'],
+                'created_at'           => $user['created_at'],
             ];
         }
 
@@ -95,9 +100,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $input = json_decode(file_get_contents('php://input'), true);
 
+    if (!is_array($input)) {
+        http_response_code(400);
+        echo json_encode(['error' => '不正なリクエストです']);
+        exit();
+    }
+
     $name        = trim($input['name']        ?? '');
     $email       = trim($input['email']       ?? '');
-    $password    = trim($input['password']    ?? '');
+    $password    = $input['password']          ?? '';
     $referrer_id = isset($input['referrer_id']) && $input['referrer_id'] !== '' && $input['referrer_id'] !== null
                     ? (int)$input['referrer_id'] : null;
 
@@ -130,7 +141,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
-        $hash = password_hash($password, PASSWORD_BCRYPT);
+        $hash = password_hash($password, PASSWORD_DEFAULT);
+        if ($hash === false) {
+            http_response_code(500);
+            echo json_encode(['error' => 'パスワードの処理に失敗しました']);
+            exit();
+        }
 
         $stmt = $pdo->prepare(
             'INSERT INTO users (name, email, password, role, referrer_id, investment_amount, rank)

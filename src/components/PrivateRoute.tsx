@@ -23,9 +23,16 @@ export default function PrivateRoute({ role, children }: PrivateRouteProps) {
     return <Navigate to="/login" replace />;
   }
 
-  if (user.role !== role) {
+  // rootはadminルートにもアクセス可能
+  const hasAccess =
+    user.role === role ||
+    (role === 'admin' && user.role === 'root');
+
+  if (!hasAccess) {
     const dashboard =
-      user.role === 'admin' ? '/admin/dashboard' : '/member/dashboard';
+      user.role === 'admin' || user.role === 'root'
+        ? '/admin/dashboard'
+        : '/member/dashboard';
     return <Navigate to={dashboard} replace />;
   }
 
