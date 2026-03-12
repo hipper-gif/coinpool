@@ -18,12 +18,23 @@ interface Member {
   created_at: string;
 }
 
+interface CapWarning {
+  user_id: number;
+  name: string;
+  investment: number;
+  total_bonus: number;
+  cap_limit: number;
+  excess: number;
+}
+
 interface Stats {
   totalMembers: number;
   totalInvestment: number;
   poolBalance: number;
   totalBonus: number;
   rankCounts: Record<Rank, number>;
+  capWarnings: CapWarning[];
+  bonusCapRate: number;
 }
 
 const RANKS: Rank[] = ['none', 'bronze', 'silver', 'gold', 'platinum', 'diamond'];
@@ -80,8 +91,12 @@ export default function AdminDashboard() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const res = await apiClient.get<Member[]>('/members/index.php');
-        const members = res.data ?? [];
+        const [membersRes, sysRes] = await Promise.all([
+          apiClient.get<Member[]>('/members/index.php'),
+          apiClient.get<Record<string, string>>('/settings/system.php').catch(() => ({ data: {} as Record<string, string> })),
+        ]);
+        const members = membersRes.data ?? [];
+        const bonusCapRate = parseFloat(sysRes.data?.bonus_cap_rate ?? '0') || 0;
 
         const totalInvestment = members.reduce(
           (sum, m) => sum + (m.investment_amount ?? 0),
@@ -103,15 +118,33 @@ export default function AdminDashboard() {
           rankCounts[r] = (rankCounts[r] ?? 0) + 1;
         }
 
-        // プール残高: 全メンバーの運用額の合計の一定割合（仮: 5%）として表示
-        const poolBalance = totalInvestment * 0.05;
+        // キャップ超過チェック
+        const capWarnings: CapWarning[] = [];
+        if (bonusCapRate > 0) {
+          for (const m of members) {
+            if (m.investment_amount <= 0) continue;
+            const capLimit = m.investment_amount * (bonusCapRate / 100);
+            if ((m.total_bonus ?? 0) > capLimit) {
+              capWarnings.push({
+                user_id: m.id,
+                name: m.name,
+                investment: m.investment_amount,
+                total_bonus: m.total_bonus ?? 0,
+                cap_limit: capLimit,
+                excess: (m.total_bonus ?? 0) - capLimit,
+              });
+            }
+          }
+        }
 
         setStats({
           totalMembers: members.length,
           totalInvestment,
-          poolBalance,
+          poolBalance: 0,
           totalBonus,
           rankCounts,
+          capWarnings,
+          bonusCapRate,
         });
 
         // ID降順で最新5件
@@ -189,6 +222,42 @@ export default function AdminDashboard() {
           </p>
         </div>
       </div>
+
+      {/* ボーナスキャップ超過警告 */}
+      {stats && stats.capWarnings.length > 0 && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-5 mb-8">
+          <h3 className="text-sm font-bold text-amber-800 mb-2">
+            ボーナス上限超過警告（上限率: {stats.bonusCapRate}%）
+          </h3>
+          <p className="text-xs text-amber-700 mb-3">
+            以下のメンバーのボーナス合計が投資額の{stats.bonusCapRate}%を超えています。
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-amber-700 border-b border-amber-200">
+                  <th className="pb-2 pr-4">メンバー</th>
+                  <th className="pb-2 pr-4 text-right">投資額</th>
+                  <th className="pb-2 pr-4 text-right">ボーナス合計</th>
+                  <th className="pb-2 pr-4 text-right">上限</th>
+                  <th className="pb-2 text-right">超過額</th>
+                </tr>
+              </thead>
+              <tbody>
+                {stats.capWarnings.map((w) => (
+                  <tr key={w.user_id} className="border-b border-amber-100">
+                    <td className="py-2 pr-4 font-medium text-amber-900">{w.name}</td>
+                    <td className="py-2 pr-4 text-right">{formatCurrency(w.investment)}</td>
+                    <td className="py-2 pr-4 text-right font-bold text-red-700">{formatCurrency(w.total_bonus)}</td>
+                    <td className="py-2 pr-4 text-right">{formatCurrency(w.cap_limit)}</td>
+                    <td className="py-2 text-right font-bold text-red-600">+{formatCurrency(w.excess)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       {/* ランク別メンバー数（バッジ） */}
       <div className="bg-white rounded-xl shadow-sm p-6 mb-8">

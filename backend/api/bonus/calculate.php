@@ -439,9 +439,9 @@ try {
     }
 
     // ---------------------------------------------------------------
-    // 4d. ボーナスキャップ（投資額 × bonus_cap_rate% を上限）
+    // 4d. ボーナスキャップ超過チェック（警告のみ、縮小しない）
     // ---------------------------------------------------------------
-    $cappedCount = 0;
+    $capWarnings = [];
     if ($bonusCapRate > 0) {
         foreach (array_keys($usersById) as $uid) {
             $investAmt = $usersById[$uid]['investment_amount'];
@@ -454,12 +454,14 @@ try {
                       + $bonuses[$uid]['pool_bonus'];
 
             if ($total > $capLimit && $total > 0) {
-                $scale = $capLimit / $total;
-                $bonuses[$uid]['unilevel_bonus']  *= $scale;
-                $bonuses[$uid]['infinity_bonus']  *= $scale;
-                $bonuses[$uid]['megamatch_bonus'] *= $scale;
-                $bonuses[$uid]['pool_bonus']      *= $scale;
-                $cappedCount++;
+                $capWarnings[] = [
+                    'user_id'    => $uid,
+                    'name'       => $usersById[$uid]['name'],
+                    'investment' => $investAmt,
+                    'total_bonus'=> round($total, 2),
+                    'cap_limit'  => round($capLimit, 2),
+                    'excess'     => round($total - $capLimit, 2),
+                ];
             }
         }
     }
@@ -506,7 +508,7 @@ try {
         'pool_member_contrib'  => round($memberContribution, 2),
         'pool_fee_contrib'     => round($feeContribution, 2),
         'bonus_cap_rate'       => $bonusCapRate,
-        'capped_users'         => $cappedCount,
+        'cap_warnings'         => $capWarnings,
     ]);
 
 } catch (PDOException $e) {
