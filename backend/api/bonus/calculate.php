@@ -101,6 +101,22 @@ try {
     $poolBalance  = $poolRecord ? (float)$poolRecord['balance'] : 0.0;
     $poolRecordId = $poolRecord ? (int)$poolRecord['id'] : null;
 
+    // ボーナスキャップ率（system_settings テーブルから取得）
+    // 0 または未設定の場合はキャップ無効
+    $bonusCapRate = 0.0;
+    try {
+        $capStmt = $pdo->query(
+            "SELECT setting_value FROM system_settings WHERE setting_key = 'bonus_cap_rate' LIMIT 1"
+        );
+        $capRow = $capStmt->fetch();
+        if ($capRow && (float)$capRow['setting_value'] > 0) {
+            $bonusCapRate = (float)$capRow['setting_value'];
+        }
+    } catch (PDOException $e) {
+        // テーブル未作成の場合は無視（キャップ無効のまま）
+        $bonusCapRate = 0.0;
+    }
+
     // 基準収益率 5%
     $BASE_YIELD_RATE = 0.05;
 
@@ -423,6 +439,32 @@ try {
     }
 
     // ---------------------------------------------------------------
+    // 4d. ボーナスキャップ（投資額 × bonus_cap_rate% を上限）
+    // ---------------------------------------------------------------
+    $cappedCount = 0;
+    if ($bonusCapRate > 0) {
+        foreach (array_keys($usersById) as $uid) {
+            $investAmt = $usersById[$uid]['investment_amount'];
+            if ($investAmt <= 0) continue;
+
+            $capLimit = $investAmt * ($bonusCapRate / 100);
+            $total    = $bonuses[$uid]['unilevel_bonus']
+                      + $bonuses[$uid]['infinity_bonus']
+                      + $bonuses[$uid]['megamatch_bonus']
+                      + $bonuses[$uid]['pool_bonus'];
+
+            if ($total > $capLimit && $total > 0) {
+                $scale = $capLimit / $total;
+                $bonuses[$uid]['unilevel_bonus']  *= $scale;
+                $bonuses[$uid]['infinity_bonus']  *= $scale;
+                $bonuses[$uid]['megamatch_bonus'] *= $scale;
+                $bonuses[$uid]['pool_bonus']      *= $scale;
+                $cappedCount++;
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------
     // 5. bonus_snapshots に upsert
     // ---------------------------------------------------------------
     $upsertStmt = $pdo->prepare(
@@ -463,6 +505,8 @@ try {
         'pool_distributed'     => round($totalDistributed, 2),
         'pool_member_contrib'  => round($memberContribution, 2),
         'pool_fee_contrib'     => round($feeContribution, 2),
+        'bonus_cap_rate'       => $bonusCapRate,
+        'capped_users'         => $cappedCount,
     ]);
 
 } catch (PDOException $e) {

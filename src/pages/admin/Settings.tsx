@@ -24,6 +24,10 @@ interface UnilevelRateRow {
   rate: number;
 }
 
+interface SystemSettings {
+  bonus_cap_rate: number;
+}
+
 interface ApiResponse {
   rank_conditions: RankConditionRow[];
   unilevel_rates: UnilevelRateRow[];
@@ -41,12 +45,13 @@ const rankOrder: Rank[] = ['bronze', 'silver', 'gold', 'platinum', 'diamond'];
 
 type RankField = keyof Omit<RankConditionRow, 'rank'>;
 
-type Tab = 'rank' | 'unilevel';
+type Tab = 'rank' | 'unilevel' | 'system';
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<Tab>('rank');
   const [rankConditions, setRankConditions] = useState<RankConditionRow[]>([]);
   const [unilevelRates, setUnilevelRates] = useState<UnilevelRateRow[]>([]);
+  const [systemSettings, setSystemSettings] = useState<SystemSettings>({ bonus_cap_rate: 0 });
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveLoading, setSaveLoading] = useState(false);
@@ -56,9 +61,13 @@ export default function Settings() {
   useEffect(() => {
     const fetchSettings = async () => {
       try {
-        const res = await apiClient.get<ApiResponse>('/settings/index.php');
+        const [res, sysRes] = await Promise.all([
+          apiClient.get<ApiResponse>('/settings/index.php'),
+          apiClient.get<SystemSettings>('/settings/system.php'),
+        ]);
         setRankConditions(res.data.rank_conditions);
         setUnilevelRates(res.data.unilevel_rates);
+        setSystemSettings(sysRes.data);
       } catch {
         setError('設定の取得に失敗しました。');
       } finally {
@@ -93,10 +102,14 @@ export default function Settings() {
     setSaveSuccess(false);
     setSaveLoading(true);
     try {
-      await apiClient.put('/settings/index.php', {
-        rank_conditions: rankConditions,
-        unilevel_rates: unilevelRates,
-      });
+      if (activeTab === 'system') {
+        await apiClient.put('/settings/system.php', systemSettings);
+      } else {
+        await apiClient.put('/settings/index.php', {
+          rank_conditions: rankConditions,
+          unilevel_rates: unilevelRates,
+        });
+      }
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 3000);
     } catch {
@@ -146,6 +159,16 @@ export default function Settings() {
           }`}
         >
           ユニレベル率
+        </button>
+        <button
+          onClick={() => setActiveTab('system')}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === 'system'
+              ? 'bg-white text-gray-800 shadow-sm'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          システム設定
         </button>
       </div>
 
@@ -257,6 +280,27 @@ export default function Settings() {
                   onChange={(v) => handleUnilevelChange(ur.level, v)}
                 />
               ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'system' && (
+          <div className="bg-white rounded-xl shadow-sm p-6">
+            <h3 className="text-base font-semibold text-gray-700 mb-4">
+              システム設定
+            </h3>
+            <div className="max-w-sm text-sm">
+              <FieldInput
+                label="ボーナス上限率 (%)"
+                value={systemSettings.bonus_cap_rate}
+                onChange={(v) =>
+                  setSystemSettings((prev) => ({ ...prev, bonus_cap_rate: Number(v) }))
+                }
+                step="0.1"
+              />
+              <p className="text-xs text-gray-500 mt-2">
+                メンバーの投資額に対するボーナス合計の上限。0で無制限。
+              </p>
             </div>
           </div>
         )}
