@@ -309,14 +309,15 @@ try {
             $megamatchBonus = 0.0;
 
             if ($descOrder === $userOrder) {
-                // 同ランク
+                // 同ランク：同ランクの傘下メンバーの報酬からsame_rate%を受取る
                 $rate = $rankConditions[$userRank]['megamatch_same_rate'] ?? 0.0;
                 $megamatchBonus = $descSubTotal * ($rate / 100);
-            } elseif ($descOrder > $userOrder) {
-                // 上位ランク（傘下に上位ランクがいる場合）
+            } elseif ($descOrder < $userOrder) {
+                // 下位ランク：自分より下のランクの傘下メンバーの報酬からupper_rate%を受取る
                 $rate = $rankConditions[$userRank]['megamatch_upper_rate'] ?? 0.0;
                 $megamatchBonus = $descSubTotal * ($rate / 100);
             }
+            // descOrder > userOrder（傘下に自分より上位ランクがいる場合）は対象外
 
             if ($megamatchBonus > 0) {
                 $bonuses[$uid]['megamatch_bonus'] += $megamatchBonus;
