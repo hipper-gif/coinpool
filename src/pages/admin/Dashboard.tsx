@@ -22,7 +22,7 @@ interface CapWarning {
   user_id: number;
   name: string;
   investment: number;
-  total_bonus: number;
+  total_outflow: number;
   cap_limit: number;
   excess: number;
 }
@@ -91,12 +91,14 @@ export default function AdminDashboard() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [membersRes, sysRes] = await Promise.all([
+        const [membersRes, sysRes, bonusRes] = await Promise.all([
           apiClient.get<Member[]>('/members/index.php'),
           apiClient.get<Record<string, string>>('/settings/system.php').catch(() => ({ data: {} as Record<string, string> })),
+          apiClient.post<{ bonus_cap_rate: number; cap_warnings: CapWarning[] }>('/bonus/calculate.php', {}).catch(() => ({ data: { bonus_cap_rate: 0, cap_warnings: [] } })),
         ]);
         const members = membersRes.data ?? [];
-        const bonusCapRate = parseFloat(sysRes.data?.bonus_cap_rate ?? '0') || 0;
+        const bonusCapRate = bonusRes.data?.bonus_cap_rate ?? (parseFloat(sysRes.data?.bonus_cap_rate ?? '0') || 0);
+        const capWarnings: CapWarning[] = bonusRes.data?.cap_warnings ?? [];
 
         const totalInvestment = members.reduce(
           (sum, m) => sum + (m.investment_amount ?? 0),
@@ -116,25 +118,6 @@ export default function AdminDashboard() {
         for (const m of members) {
           const r = m.rank ?? 'none';
           rankCounts[r] = (rankCounts[r] ?? 0) + 1;
-        }
-
-        // キャップ超過チェック
-        const capWarnings: CapWarning[] = [];
-        if (bonusCapRate > 0) {
-          for (const m of members) {
-            if (m.investment_amount <= 0) continue;
-            const capLimit = m.investment_amount * (bonusCapRate / 100);
-            if ((m.total_bonus ?? 0) > capLimit) {
-              capWarnings.push({
-                user_id: m.id,
-                name: m.name,
-                investment: m.investment_amount,
-                total_bonus: m.total_bonus ?? 0,
-                cap_limit: capLimit,
-                excess: (m.total_bonus ?? 0) - capLimit,
-              });
-            }
-          }
         }
 
         setStats({
@@ -230,7 +213,7 @@ export default function AdminDashboard() {
             ボーナス上限超過警告（上限率: {stats.bonusCapRate}%）
           </h3>
           <p className="text-xs text-amber-700 mb-3">
-            以下のメンバーのボーナス合計が投資額の{stats.bonusCapRate}%を超えています。
+            以下のメンバーの投資額から発生する報酬合計が投資額の{stats.bonusCapRate}%を超えています。
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -238,7 +221,7 @@ export default function AdminDashboard() {
                 <tr className="text-left text-xs text-amber-700 border-b border-amber-200">
                   <th className="pb-2 pr-4">メンバー</th>
                   <th className="pb-2 pr-4 text-right">投資額</th>
-                  <th className="pb-2 pr-4 text-right">ボーナス合計</th>
+                  <th className="pb-2 pr-4 text-right">発生報酬合計</th>
                   <th className="pb-2 pr-4 text-right">上限</th>
                   <th className="pb-2 text-right">超過額</th>
                 </tr>
@@ -248,7 +231,7 @@ export default function AdminDashboard() {
                   <tr key={w.user_id} className="border-b border-amber-100">
                     <td className="py-2 pr-4 font-medium text-amber-900">{w.name}</td>
                     <td className="py-2 pr-4 text-right">{formatCurrency(w.investment)}</td>
-                    <td className="py-2 pr-4 text-right font-bold text-red-700">{formatCurrency(w.total_bonus)}</td>
+                    <td className="py-2 pr-4 text-right font-bold text-red-700">{formatCurrency(w.total_outflow)}</td>
                     <td className="py-2 pr-4 text-right">{formatCurrency(w.cap_limit)}</td>
                     <td className="py-2 text-right font-bold text-red-600">+{formatCurrency(w.excess)}</td>
                   </tr>

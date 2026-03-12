@@ -131,6 +131,8 @@ try {
     // ボーナス蓄積配列を初期化（全ユーザー分。メガマッチ控除のため）
     // ---------------------------------------------------------------
     $bonuses = [];
+    // 各メンバーの投資額から発生して他者に渡る報酬の合計（キャップチェック用）
+    $outflows = [];
     foreach (array_keys($usersById) as $uid) {
         $bonuses[$uid] = [
             'unilevel_bonus'  => 0.0,
@@ -138,6 +140,7 @@ try {
             'megamatch_bonus' => 0.0,
             'pool_bonus'      => 0.0,
         ];
+        $outflows[$uid] = 0.0;
     }
 
     // ---------------------------------------------------------------
@@ -258,6 +261,9 @@ try {
             $unilevelBonus = $investAmt * ($rate / 100);
             $bonuses[$parentId]['unilevel_bonus'] += $unilevelBonus;
 
+            // 流出額トラッカー: $uid の投資額から発生した報酬
+            $outflows[$uid] += $unilevelBonus;
+
             $currentId = $parentId;
         }
     }
@@ -288,7 +294,21 @@ try {
             $legInvestment = getLegInvestment($childId, $childrenMap, $usersById);
             $legRevenue    = $legInvestment * $BASE_YIELD_RATE;
 
-            $bonuses[$uid]['infinity_bonus'] += $legRevenue * ($diffRate / 100);
+            $infinityAmount = $legRevenue * ($diffRate / 100);
+            $bonuses[$uid]['infinity_bonus'] += $infinityAmount;
+
+            // 流出額トラッカー: レグ内の各メンバーの投資額に按分
+            if ($legInvestment > 0 && $infinityAmount > 0) {
+                $visited2 = [$childId => true];
+                $legMembers = array_merge([$childId], getDescendants($childId, $childrenMap, $visited2));
+                foreach ($legMembers as $legMemberId) {
+                    if (!isset($usersById[$legMemberId])) continue;
+                    $memberInvest = $usersById[$legMemberId]['investment_amount'] ?? 0;
+                    if ($memberInvest > 0) {
+                        $outflows[$legMemberId] += $infinityAmount * ($memberInvest / $legInvestment);
+                    }
+                }
+            }
         }
     }
 
@@ -440,6 +460,8 @@ try {
 
     // ---------------------------------------------------------------
     // 4d. ボーナスキャップ超過チェック（警告のみ、縮小しない）
+    // 各メンバーの投資額から発生して他者に渡る報酬の合計が
+    // 投資額 × bonusCapRate% を超えていないかチェック
     // ---------------------------------------------------------------
     $capWarnings = [];
     if ($bonusCapRate > 0) {
@@ -447,20 +469,17 @@ try {
             $investAmt = $usersById[$uid]['investment_amount'];
             if ($investAmt <= 0) continue;
 
-            $capLimit = $investAmt * ($bonusCapRate / 100);
-            $total    = $bonuses[$uid]['unilevel_bonus']
-                      + $bonuses[$uid]['infinity_bonus']
-                      + $bonuses[$uid]['megamatch_bonus']
-                      + $bonuses[$uid]['pool_bonus'];
+            $capLimit    = $investAmt * ($bonusCapRate / 100);
+            $totalOutflow = $outflows[$uid] ?? 0.0;
 
-            if ($total > $capLimit && $total > 0) {
+            if ($totalOutflow > $capLimit && $totalOutflow > 0) {
                 $capWarnings[] = [
-                    'user_id'    => $uid,
-                    'name'       => $usersById[$uid]['name'],
-                    'investment' => $investAmt,
-                    'total_bonus'=> round($total, 2),
-                    'cap_limit'  => round($capLimit, 2),
-                    'excess'     => round($total - $capLimit, 2),
+                    'user_id'      => $uid,
+                    'name'         => $usersById[$uid]['name'],
+                    'investment'   => $investAmt,
+                    'total_outflow'=> round($totalOutflow, 2),
+                    'cap_limit'    => round($capLimit, 2),
+                    'excess'       => round($totalOutflow - $capLimit, 2),
                 ];
             }
         }
