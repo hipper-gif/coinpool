@@ -28,6 +28,22 @@ $input        = json_decode(file_get_contents('php://input'), true);
 $targetUserId = isset($input['user_id']) && $input['user_id'] !== null
               ? (int)$input['user_id'] : null;
 
+/**
+ * グループ投資額を再帰計算（ランク判定用）
+ */
+function calcGroupInvestment(int $userId, array $childrenMap, array $usersById): float
+{
+    $sum = 0.0;
+    if (!empty($childrenMap[$userId])) {
+        foreach ($childrenMap[$userId] as $childId) {
+            if (!isset($usersById[$childId])) continue;
+            $sum += $usersById[$childId]['investment_amount'];
+            $sum += calcGroupInvestment($childId, $childrenMap, $usersById);
+        }
+    }
+    return $sum;
+}
+
 try {
     $pdo = getDB();
     $pdo->beginTransaction();
@@ -54,7 +70,7 @@ try {
         ];
     }
 
-    // 親→子マップ
+    // 親→子マップ（ランク再計算にも使用）
     $childrenMap = [];
     foreach ($usersById as $uid => $u) {
         if ($u['referrer_id'] !== null) {
@@ -62,7 +78,42 @@ try {
         }
     }
 
-    // ランク条件（ランクをキーに）
+    // ---------------------------------------------------------------
+    // ランク一括再計算（ボーナス計算前に全員のランクを最新化）
+    // ---------------------------------------------------------------
+    $rankCondStmt = $pdo->query(
+        'SELECT rank, min_investment, min_direct_referrals, min_group_investment
+         FROM rank_conditions ORDER BY min_investment DESC'
+    );
+    $rankCondForCalc = $rankCondStmt->fetchAll();
+
+    $rankUpdateStmt = $pdo->prepare('UPDATE users SET rank = ? WHERE id = ?');
+    $rankChanges = [];
+
+    foreach ($usersById as $uid => $user) {
+        $directCount = count($childrenMap[$uid] ?? []);
+        $groupInvestment = calcGroupInvestment($uid, $childrenMap, $usersById);
+
+        $newRank = 'none';
+        foreach ($rankCondForCalc as $cond) {
+            if (
+                $user['investment_amount'] >= (float)$cond['min_investment'] &&
+                $directCount >= (int)$cond['min_direct_referrals'] &&
+                $groupInvestment >= (float)$cond['min_group_investment']
+            ) {
+                $newRank = $cond['rank'];
+                break;
+            }
+        }
+
+        if ($newRank !== $user['rank']) {
+            $rankUpdateStmt->execute([$newRank, $uid]);
+            $rankChanges[] = ['id' => $uid, 'name' => $user['name'], 'from' => $user['rank'], 'to' => $newRank];
+            $usersById[$uid]['rank'] = $newRank;
+        }
+    }
+
+    // ランク条件（ランクをキーに）— ボーナス率等を含む完全版
     $stmt = $pdo->query(
         'SELECT rank, min_investment, min_direct_referrals, min_group_investment,
                 mm_min_investment, mm_min_direct_referrals, mm_min_group_investment,
@@ -529,6 +580,7 @@ try {
         'pool_fee_contrib'     => round($feeContribution, 2),
         'bonus_cap_rate'       => $bonusCapRate,
         'cap_warnings'         => $capWarnings,
+        'rank_changes'         => $rankChanges,
     ]);
 
 } catch (PDOException $e) {
