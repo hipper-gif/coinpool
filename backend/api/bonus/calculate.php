@@ -258,7 +258,8 @@ try {
             if ($parentId === null || !isset($usersById[$parentId])) break;
 
             $rate = $unilevelRates[$level] ?? 0.0;
-            $unilevelBonus = $investAmt * ($rate / 100);
+            $revenue = $investAmt * $BASE_YIELD_RATE; // 報酬額（投資額×利回り）
+            $unilevelBonus = $revenue * ($rate / 100);
             $bonuses[$parentId]['unilevel_bonus'] += $unilevelBonus;
 
             // 流出額トラッカー: $uid の投資額から発生した報酬
