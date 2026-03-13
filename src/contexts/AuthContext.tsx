@@ -15,6 +15,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
+  wallet_address?: string | null;
 }
 
 interface AuthContextType {

@@ -54,7 +54,7 @@ try {
     // 全ユーザー取得（root除外）
     $stmt = $pdo->prepare(
         "SELECT u.id, u.name, u.email, u.rank,
-                u.investment_amount, u.created_at,
+                u.investment_amount, u.wallet_address, u.created_at,
                 (SELECT COUNT(*) FROM users c WHERE c.referrer_id = u.id) AS direct_referral_count
          FROM users u
          WHERE u.role != :role
@@ -93,6 +93,7 @@ try {
         'ID',
         '名前',
         'メールアドレス',
+        'ウォレットアドレス',
         'ランク',
         '運用額',
         '直紹介数',
@@ -120,6 +121,7 @@ try {
             $userId,
             $user['name'],
             $user['email'],
+            $user['wallet_address'] ?? '',
             $user['rank'],
             (float)$user['investment_amount'],
             (int)$user['direct_referral_count'],

@@ -18,7 +18,7 @@ if (empty($_SESSION['user_id'])) {
 
 try {
     $pdo  = getDB();
-    $stmt = $pdo->prepare('SELECT id, name, email, role FROM users WHERE id = ? LIMIT 1');
+    $stmt = $pdo->prepare('SELECT id, name, email, role, wallet_address FROM users WHERE id = ? LIMIT 1');
     $stmt->execute([$_SESSION['user_id']]);
     $user = $stmt->fetch();
 
@@ -30,10 +30,11 @@ try {
     }
 
     echo json_encode([
-        'id'    => $user['id'],
-        'name'  => $user['name'],
-        'email' => $user['email'],
-        'role'  => $user['role'],
+        'id'             => $user['id'],
+        'name'           => $user['name'],
+        'email'          => $user['email'],
+        'role'           => $user['role'],
+        'wallet_address' => $user['wallet_address'],
     ]);
 } catch (PDOException $e) {
     http_response_code(500);

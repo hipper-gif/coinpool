@@ -25,11 +25,12 @@ if ($method === 'PUT') {
 
     $name            = isset($input['name']) ? trim($input['name']) : null;
     $email           = isset($input['email']) ? trim($input['email']) : null;
+    $walletAddress   = array_key_exists('wallet_address', $input ?? []) ? $input['wallet_address'] : null;
     $currentPassword = isset($input['current_password']) ? $input['current_password'] : null;
     $newPassword     = isset($input['new_password']) ? $input['new_password'] : null;
 
     // 何も変更がない場合
-    if ($name === null && $email === null && $newPassword === null) {
+    if ($name === null && $email === null && $walletAddress === null && $newPassword === null) {
         http_response_code(400);
         echo json_encode(['error' => '変更する項目がありません']);
         exit();
@@ -96,6 +97,12 @@ if ($method === 'PUT') {
             $params[] = $email;
         }
 
+        if ($walletAddress !== null) {
+            $wa = trim($walletAddress);
+            $sets[] = 'wallet_address = ?';
+            $params[] = $wa !== '' ? $wa : null;
+        }
+
         if ($newPassword !== null) {
             $sets[] = 'password = ?';
             $params[] = password_hash($newPassword, PASSWORD_DEFAULT);
@@ -109,17 +116,18 @@ if ($method === 'PUT') {
         }
 
         // 更新後のユーザー情報を取得
-        $stmt = $pdo->prepare('SELECT id, name, email, role FROM users WHERE id = ? LIMIT 1');
+        $stmt = $pdo->prepare('SELECT id, name, email, role, wallet_address FROM users WHERE id = ? LIMIT 1');
         $stmt->execute([$currentUser['id']]);
         $updatedUser = $stmt->fetch();
 
         echo json_encode([
             'message' => 'プロフィールを更新しました',
             'user'    => [
-                'id'    => $updatedUser['id'],
-                'name'  => $updatedUser['name'],
-                'email' => $updatedUser['email'],
-                'role'  => $updatedUser['role'],
+                'id'             => $updatedUser['id'],
+                'name'           => $updatedUser['name'],
+                'email'          => $updatedUser['email'],
+                'role'           => $updatedUser['role'],
+                'wallet_address' => $updatedUser['wallet_address'],
             ],
         ]);
     } catch (PDOException $e) {

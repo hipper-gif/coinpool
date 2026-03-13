@@ -54,7 +54,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
         // 全ユーザー取得（直紹介数も集計）
         $stmt = $pdo->query(
             'SELECT u.id, u.name, u.email, u.role, u.rank,
-                    u.investment_amount, u.referrer_id, u.created_at,
+                    u.investment_amount, u.referrer_id, u.wallet_address, u.created_at,
                     r.name AS referrer_name,
                     (SELECT COUNT(*) FROM users c WHERE c.referrer_id = u.id) AS direct_referral_count,
                     COALESCE(bs.total_bonus, 0) AS total_bonus
@@ -78,6 +78,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
                 'investment_amount'    => (float)$user['investment_amount'],
                 'referrer_id'          => $user['referrer_id'] !== null ? (int)$user['referrer_id'] : null,
                 'referrer_name'        => $user['referrer_name'],
+                'wallet_address'       => $user['wallet_address'],
                 'direct_referral_count'=> (int)$user['direct_referral_count'],
                 'group_investment'     => calcGroupInvestment((int)$user['id'], $childrenMap),
                 'total_bonus'          => (float)$user['total_bonus'],

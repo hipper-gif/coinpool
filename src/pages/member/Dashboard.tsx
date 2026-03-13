@@ -15,6 +15,7 @@ interface MemberDetail {
   role: string;
   rank: Rank;
   investment_amount: number;
+  wallet_address: string | null;
   referrer: {
     id: number;
     name: string;
@@ -221,6 +222,12 @@ export default function MemberDashboard() {
             <p className="text-xs text-gray-400">運用額</p>
             <p className="text-lg font-semibold text-gray-800">
               {formatCurrency(member.investment_amount)}
+            </p>
+          </div>
+          <div className="sm:col-span-2">
+            <p className="text-xs text-gray-400">ウォレットアドレス</p>
+            <p className="text-sm font-mono text-gray-700 break-all">
+              {member.wallet_address ?? '未設定'}
             </p>
           </div>
         </div>

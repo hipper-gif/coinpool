@@ -5,6 +5,7 @@ import { useAuth } from '../../contexts/AuthContext';
 const navItems = [
   { label: 'ダッシュボード', to: '/admin/dashboard' },
   { label: 'メンバー管理', to: '/admin/members' },
+  { label: '配当権一覧', to: '/admin/rights' },
   { label: '組織ツリー', to: '/admin/organization' },
   { label: '手数料テーブル', to: '/admin/fees' },
   { label: '月次レポート', to: '/admin/reports' },

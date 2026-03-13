@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `referrer_id`       INT            NULL         COMMENT '紹介者 users.id',
     `investment_amount` DECIMAL(15,2)  NOT NULL DEFAULT 0.00 COMMENT '本人運用額',
     `rank`              ENUM('none','bronze','silver','gold','platinum','diamond') NOT NULL DEFAULT 'none',
+    `wallet_address`    VARCHAR(255)   NULL         COMMENT 'ウォレットアドレス',
     `created_at`        DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at`        DATETIME       NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),

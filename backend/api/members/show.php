@@ -34,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
 
         $stmt = $pdo->prepare(
             'SELECT u.id, u.name, u.email, u.role, u.rank,
-                    u.investment_amount, u.referrer_id,
+                    u.investment_amount, u.referrer_id, u.wallet_address,
                     r.id   AS referrer_id2,
                     r.name AS referrer_name,
                     r.email AS referrer_email,
@@ -80,6 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
             'role'             => $user['role'],
             'rank'             => $user['rank'],
             'investment_amount'=> (float)$user['investment_amount'],
+            'wallet_address'   => $user['wallet_address'],
             'referrer'         => $user['referrer_id'] !== null ? [
                 'id'    => (int)$user['referrer_id2'],
                 'name'  => $user['referrer_name'],
@@ -204,6 +205,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'PUT') {
                 $params[]     = $input['rank'];
             }
 
+            if (array_key_exists('wallet_address', $input)) {
+                $wa = $input['wallet_address'] !== null ? trim($input['wallet_address']) : '';
+                $setClauses[] = 'wallet_address = ?';
+                $params[]     = $wa !== '' ? $wa : null;
+            }
+
             if (array_key_exists('referrer_id', $input)) {
                 if ($input['referrer_id'] === null || $input['referrer_id'] === '') {
                     $setClauses[] = 'referrer_id = NULL';
@@ -269,7 +276,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'PUT') {
 
         // 更新後のユーザーを返す
         $stmt = $pdo->prepare(
-            'SELECT id, name, email, role, rank, investment_amount, referrer_id
+            'SELECT id, name, email, role, rank, investment_amount, referrer_id, wallet_address
              FROM users WHERE id = ?'
         );
         $stmt->execute([$targetId]);
@@ -283,6 +290,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'PUT') {
             'rank'             => $updated['rank'],
             'investment_amount'=> (float)$updated['investment_amount'],
             'referrer_id'      => $updated['referrer_id'] !== null ? (int)$updated['referrer_id'] : null,
+            'wallet_address'   => $updated['wallet_address'],
         ]);
 
     } catch (PDOException $e) {

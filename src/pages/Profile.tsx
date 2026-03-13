@@ -14,6 +14,7 @@ export default function Profile() {
 
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
+  const [walletAddress, setWalletAddress] = useState('');
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -27,6 +28,7 @@ export default function Profile() {
     if (user) {
       setName(user.name);
       setEmail(user.email);
+      setWalletAddress(user.wallet_address ?? '');
     }
   }, [user]);
 
@@ -52,9 +54,10 @@ export default function Profile() {
     }
 
     // 送信データを構築
-    const data: Record<string, string> = {};
+    const data: Record<string, string | null> = {};
     if (name !== user?.name) data.name = name;
     if (email !== user?.email) data.email = email;
+    if (walletAddress !== (user?.wallet_address ?? '')) data.wallet_address = walletAddress || null;
     if (showPasswordSection && newPassword) {
       data.current_password = currentPassword;
       data.new_password = newPassword;
@@ -127,6 +130,20 @@ export default function Profile() {
             onChange={(e) => setEmail(e.target.value)}
             className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
             required
+          />
+        </div>
+
+        <div>
+          <label htmlFor="walletAddress" className="block text-sm font-medium text-gray-700 mb-1">
+            ウォレットアドレス
+          </label>
+          <input
+            id="walletAddress"
+            type="text"
+            value={walletAddress}
+            onChange={(e) => setWalletAddress(e.target.value)}
+            placeholder="0x..."
+            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 font-mono"
           />
         </div>
 

@@ -41,6 +41,7 @@ interface MemberDetailData {
   role: string;
   rank: Rank;
   investment_amount: number;
+  wallet_address: string | null;
   referrer: Referrer | null;
   direct_referrals: DirectReferral[];
   bonus_snapshot: BonusSnapshot | null;
@@ -88,6 +89,7 @@ export default function MemberDetail() {
   const [editRole, setEditRole] = useState('member');
   const [editRank, setEditRank] = useState<Rank>('none');
   const [editReferrerId, setEditReferrerId] = useState('');
+  const [editWalletAddress, setEditWalletAddress] = useState('');
   const [editPassword, setEditPassword] = useState('');
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
@@ -109,6 +111,7 @@ export default function MemberDetail() {
       setEditRole(res.data.role);
       setEditRank(res.data.rank ?? 'none');
       setEditReferrerId(res.data.referrer?.id != null ? String(res.data.referrer.id) : '');
+      setEditWalletAddress(res.data.wallet_address ?? '');
       setEditPassword('');
     } catch {
       setError('メンバー情報の取得に失敗しました。');
@@ -161,6 +164,7 @@ export default function MemberDetail() {
         role: editRole,
         rank: editRank,
         referrer_id: editReferrerId !== '' ? Number(editReferrerId) : null,
+        wallet_address: editWalletAddress || null,
       };
       if (editPassword !== '') {
         payload.password = editPassword;
@@ -309,6 +313,16 @@ export default function MemberDetail() {
                   </select>
                 </div>
                 <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">ウォレットアドレス</label>
+                  <input
+                    type="text"
+                    value={editWalletAddress}
+                    onChange={(e) => setEditWalletAddress(e.target.value)}
+                    placeholder="0x..."
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 font-mono"
+                  />
+                </div>
+                <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">
                     パスワード
                     <span className="text-xs text-gray-400 ml-1">（変更する場合のみ）</span>
@@ -353,6 +367,12 @@ export default function MemberDetail() {
               <p className="text-gray-500 mb-0.5">紹介者</p>
               <p className="text-gray-800">
                 {member.referrer?.name ?? 'なし'}
+              </p>
+            </div>
+            <div className="sm:col-span-2">
+              <p className="text-gray-500 mb-0.5">ウォレットアドレス</p>
+              <p className="text-gray-800 font-mono text-xs break-all">
+                {member.wallet_address ?? '未設定'}
               </p>
             </div>
           </div>
