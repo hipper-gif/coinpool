@@ -13,6 +13,7 @@ import FeeTable from './pages/admin/FeeTable';
 import AdminReports from './pages/admin/Reports';
 import ActivityLog from './pages/admin/ActivityLog';
 import Rights from './pages/admin/Rights';
+import MemberInfo from './pages/admin/MemberInfo';
 import MemberDashboard from './pages/member/Dashboard';
 import Organization from './pages/member/Organization';
 import MemberReports from './pages/member/Reports';
@@ -67,6 +68,7 @@ function AppRoutes() {
         <Route path="fees" element={<FeeTable />} />
         <Route path="reports" element={<AdminReports />} />
         <Route path="rights" element={<Rights />} />
+        <Route path="member-info" element={<MemberInfo />} />
         <Route path="activity" element={<ActivityLog />} />
         <Route path="settings" element={<Settings />} />
         <Route path="profile" element={<Profile />} />

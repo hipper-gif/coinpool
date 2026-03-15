@@ -6,6 +6,7 @@ const navItems = [
   { label: 'ダッシュボード', to: '/admin/dashboard' },
   { label: 'メンバー管理', to: '/admin/members' },
   { label: '配当権一覧', to: '/admin/rights' },
+  { label: 'ユーザー情報', to: '/admin/member-info' },
   { label: '組織ツリー', to: '/admin/organization' },
   { label: '手数料テーブル', to: '/admin/fees' },
   { label: '月次レポート', to: '/admin/reports' },

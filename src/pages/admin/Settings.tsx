@@ -28,6 +28,15 @@ interface SystemSettings {
   bonus_cap_rate: number;
 }
 
+interface CompanyWallet {
+  id?: number;
+  label: string;
+  wallet_address: string;
+  percentage: number;
+  wallet_type: 'fee' | 'pool';
+  sort_order: number;
+}
+
 interface ApiResponse {
   rank_conditions: RankConditionRow[];
   unilevel_rates: UnilevelRateRow[];
@@ -45,13 +54,14 @@ const rankOrder: Rank[] = ['bronze', 'silver', 'gold', 'platinum', 'diamond'];
 
 type RankField = keyof Omit<RankConditionRow, 'rank'>;
 
-type Tab = 'rank' | 'unilevel' | 'system';
+type Tab = 'rank' | 'unilevel' | 'system' | 'wallets';
 
 export default function Settings() {
   const [activeTab, setActiveTab] = useState<Tab>('rank');
   const [rankConditions, setRankConditions] = useState<RankConditionRow[]>([]);
   const [unilevelRates, setUnilevelRates] = useState<UnilevelRateRow[]>([]);
   const [systemSettings, setSystemSettings] = useState<SystemSettings>({ bonus_cap_rate: 0 });
+  const [companyWallets, setCompanyWallets] = useState<CompanyWallet[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saveLoading, setSaveLoading] = useState(false);
@@ -68,6 +78,12 @@ export default function Settings() {
         setRankConditions(res.data.rank_conditions);
         setUnilevelRates(res.data.unilevel_rates);
         setSystemSettings(sysRes.data);
+        try {
+          const walletsRes = await apiClient.get<{ wallets: CompanyWallet[] }>('/company-wallets/index.php');
+          setCompanyWallets(walletsRes.data.wallets);
+        } catch {
+          // table may not exist yet — ignore
+        }
       } catch {
         setError('設定の取得に失敗しました。');
       } finally {
@@ -104,6 +120,8 @@ export default function Settings() {
     try {
       if (activeTab === 'system') {
         await apiClient.put('/settings/system.php', systemSettings);
+      } else if (activeTab === 'wallets') {
+        await apiClient.put('/company-wallets/index.php', { wallets: companyWallets });
       } else {
         await apiClient.put('/settings/index.php', {
           rank_conditions: rankConditions,
@@ -169,6 +187,16 @@ export default function Settings() {
           }`}
         >
           システム設定
+        </button>
+        <button
+          onClick={() => setActiveTab('wallets')}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === 'wallets'
+              ? 'bg-white text-gray-800 shadow-sm'
+              : 'text-gray-500 hover:text-gray-700'
+          }`}
+        >
+          会社ウォレット
         </button>
       </div>
 
@@ -301,6 +329,198 @@ export default function Settings() {
               <p className="text-xs text-gray-500 mt-2">
                 メンバーの投資額に対するボーナス合計の上限。0で無制限。
               </p>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'wallets' && (
+          <div>
+            {(() => {
+              const feeTotal = companyWallets
+                .filter((w) => w.wallet_type === 'fee')
+                .reduce((sum, w) => sum + w.percentage, 0);
+              return (
+                <div className="mb-4 flex items-center gap-3">
+                  <span
+                    className={`inline-block text-xs font-medium rounded-full px-3 py-1 ${
+                      Math.abs(feeTotal - 100) < 0.01
+                        ? 'bg-green-100 text-green-700'
+                        : 'bg-red-100 text-red-700'
+                    }`}
+                  >
+                    fee合計: {feeTotal.toFixed(2)}%
+                  </span>
+                  {Math.abs(feeTotal - 100) >= 0.01 && (
+                    <span className="text-xs text-red-600">
+                      fee タイプの配分率合計が100%になっていません
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
+
+            <div className="bg-white rounded-xl shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 border-b border-gray-200">
+                      <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                        ラベル
+                      </th>
+                      <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                        ウォレットアドレス
+                      </th>
+                      <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                        タイプ
+                      </th>
+                      <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                        配分率 (%)
+                      </th>
+                      <th className="text-left px-4 py-3 font-semibold text-gray-600">
+                        並び順
+                      </th>
+                      <th className="px-4 py-3 font-semibold text-gray-600">
+                        操作
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {companyWallets.map((wallet, index) => (
+                      <tr
+                        key={index}
+                        className="border-b border-gray-100 hover:bg-gray-50"
+                      >
+                        <td className="px-4 py-3">
+                          <input
+                            type="text"
+                            value={wallet.label}
+                            onChange={(e) =>
+                              setCompanyWallets((prev) =>
+                                prev.map((w, i) =>
+                                  i === index ? { ...w, label: e.target.value } : w,
+                                ),
+                              )
+                            }
+                            className="w-40 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="text"
+                            value={wallet.wallet_address}
+                            onChange={(e) =>
+                              setCompanyWallets((prev) =>
+                                prev.map((w, i) =>
+                                  i === index
+                                    ? { ...w, wallet_address: e.target.value }
+                                    : w,
+                                ),
+                              )
+                            }
+                            className="w-64 border border-gray-300 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                            placeholder="0x..."
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <select
+                            value={wallet.wallet_type}
+                            onChange={(e) =>
+                              setCompanyWallets((prev) =>
+                                prev.map((w, i) =>
+                                  i === index
+                                    ? { ...w, wallet_type: e.target.value as 'fee' | 'pool' }
+                                    : w,
+                                ),
+                              )
+                            }
+                            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                          >
+                            <option value="fee">手数料配分先</option>
+                            <option value="pool">プール拠出先</option>
+                          </select>
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="number"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value={wallet.percentage}
+                            onChange={(e) =>
+                              setCompanyWallets((prev) =>
+                                prev.map((w, i) =>
+                                  i === index
+                                    ? { ...w, percentage: Number(e.target.value) }
+                                    : w,
+                                ),
+                              )
+                            }
+                            className="w-24 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                          />
+                        </td>
+                        <td className="px-4 py-3">
+                          <input
+                            type="number"
+                            min="0"
+                            step="1"
+                            value={wallet.sort_order}
+                            onChange={(e) =>
+                              setCompanyWallets((prev) =>
+                                prev.map((w, i) =>
+                                  i === index
+                                    ? { ...w, sort_order: Number(e.target.value) }
+                                    : w,
+                                ),
+                              )
+                            }
+                            className="w-20 border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                          />
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setCompanyWallets((prev) =>
+                                prev.filter((_, i) => i !== index),
+                              )
+                            }
+                            className="text-red-400 hover:text-red-600 transition-colors text-xs font-medium"
+                          >
+                            削除
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {companyWallets.length === 0 && (
+                <p className="text-center text-gray-400 py-8 text-sm">
+                  ウォレットがありません。行を追加してください。
+                </p>
+              )}
+            </div>
+
+            <div className="mt-4">
+              <button
+                type="button"
+                onClick={() =>
+                  setCompanyWallets((prev) => [
+                    ...prev,
+                    {
+                      label: '',
+                      wallet_address: '',
+                      percentage: 0,
+                      wallet_type: 'fee',
+                      sort_order: prev.length + 1,
+                    },
+                  ])
+                }
+                className="text-indigo-600 hover:text-indigo-800 text-sm font-medium transition-colors"
+              >
+                + 行を追加
+              </button>
             </div>
           </div>
         )}
