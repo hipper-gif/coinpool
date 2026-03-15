@@ -369,9 +369,20 @@ try {
         $infinityTotal += $inf['rate'];
     }
 
+    // 会社手数料: ウォレット未登録でもcompany_fee_rate分は必ず計上
     $companyTotal = 0;
     foreach ($feeWallets as $fw) {
         $companyTotal += $fw['actual_pct'];
+    }
+    if (empty($feeWallets) && $companyFeeRate > 0) {
+        // ウォレット未登録 → 会社手数料全体を1行で表示
+        $feeWallets[] = [
+            'label' => '会社手数料',
+            'wallet_address' => '',
+            'share_pct' => 100.0,
+            'actual_pct' => $companyFeeRate,
+        ];
+        $companyTotal = $companyFeeRate;
     }
 
     $allocatedTotal = round($memberPct + $unilevelTotal + $infinityTotal + $poolContribPct + $companyTotal, 2);
