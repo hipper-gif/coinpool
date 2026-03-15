@@ -184,7 +184,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'PUT') {
             }
 
             if (isset($input['role'])) {
-                $validRoles = ['admin', 'member'];
+                $validRoles = ['admin', 'member', 'pool'];
                 if (!in_array($input['role'], $validRoles)) {
                     http_response_code(400);
                     echo json_encode(['error' => 'role は admin または member を指定してください']);
@@ -330,10 +330,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'DELETE') {
             exit();
         }
 
-        // rootユーザーは削除不可
-        if ($target['role'] === 'root') {
+        // rootユーザー・poolアカウントは削除不可
+        if ($target['role'] === 'root' || $target['role'] === 'pool') {
             http_response_code(403);
-            echo json_encode(['error' => 'システム管理者は削除できません']);
+            echo json_encode(['error' => 'このユーザーは削除できません']);
             exit();
         }
 

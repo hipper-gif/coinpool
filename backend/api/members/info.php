@@ -53,7 +53,7 @@ try {
         $stmt = $pdo->query(
             "SELECT id, name, email, rank, investment_amount
              FROM users
-             WHERE role != 'root'
+             WHERE role NOT IN ('root', 'pool')
              ORDER BY id ASC"
         );
         $members = $stmt->fetchAll();

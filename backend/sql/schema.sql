@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS `users` (
     `name`              VARCHAR(100)   NOT NULL,
     `email`             VARCHAR(255)   NOT NULL,
     `password`          VARCHAR(255)   NOT NULL COMMENT 'bcrypt hash',
-    `role`              ENUM('root','admin','member') NOT NULL DEFAULT 'member',
+    `role`              ENUM('root','admin','member','pool') NOT NULL DEFAULT 'member',
     `referrer_id`       INT            NULL         COMMENT '紹介者 users.id',
     `investment_amount` DECIMAL(15,2)  NOT NULL DEFAULT 0.00 COMMENT '本人運用額',
     `rank`              ENUM('none','bronze','silver','gold','platinum','diamond') NOT NULL DEFAULT 'none',
@@ -176,6 +176,26 @@ VALUES
         '$2y$10$placeholder.replace.this.with.actual.bcrypt.hash.generated.by.PHP',
         -- ^ bcrypt hash of 'Coinpool2525' (cost=10) — プレースホルダー。サーバーで生成要。
         'root',
+        NULL,
+        0.00,
+        'none',
+        NOW(),
+        NOW()
+    );
+
+-- -------------------------------------------------------------
+-- pool user (プール用アカウント)
+-- ボーナス計算・メンバー一覧・組織ツリーから除外される
+-- -------------------------------------------------------------
+INSERT INTO `users`
+    (`name`, `email`, `password`, `role`, `referrer_id`, `investment_amount`, `rank`, `created_at`, `updated_at`)
+VALUES
+    (
+        'Pool',
+        'pool@coinpool.system',
+        '$2y$10$no.login.allowed.pool.account.placeholder.hash.value',
+        -- ^ ログイン不可（ダミーハッシュ）
+        'pool',
         NULL,
         0.00,
         'none',

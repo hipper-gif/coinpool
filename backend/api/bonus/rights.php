@@ -21,7 +21,7 @@ try {
     // 全メンバー（root除外）の投資額合計 → 発生収益を算出
     $stmt = $pdo->query(
         "SELECT COALESCE(SUM(investment_amount), 0) AS total_investment
-         FROM users WHERE role != 'root'"
+         FROM users WHERE role NOT IN ('root', 'pool')"
     );
     $totalInvestment = (float)$stmt->fetch()['total_investment'];
     $totalRevenue    = $totalInvestment * 0.05; // 基準収益率 5%
@@ -36,7 +36,7 @@ try {
                 COALESCE(bs.total_bonus, 0)     AS total_bonus
          FROM users u
          LEFT JOIN bonus_snapshots bs ON bs.user_id = u.id
-         WHERE u.role != 'root'
+         WHERE u.role NOT IN ('root', 'pool')
          ORDER BY COALESCE(bs.total_bonus, 0) DESC"
     );
     $members = $stmt->fetchAll();

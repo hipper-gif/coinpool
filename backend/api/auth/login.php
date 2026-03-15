@@ -39,6 +39,13 @@ try {
         exit();
     }
 
+    // poolアカウントはログイン不可
+    if ($user['role'] === 'pool') {
+        http_response_code(403);
+        echo json_encode(['error' => 'このアカウントではログインできません']);
+        exit();
+    }
+
     session_regenerate_id(true);
     $_SESSION['user_id'] = $user['id'];
 

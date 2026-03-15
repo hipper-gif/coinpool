@@ -83,7 +83,7 @@ const RANK_BORDER: Record<Rank, string> = {
 // ---------------------------------------------------------------
 
 function buildTree(members: MemberRaw[]): MemberNode[] {
-  const filtered = members.filter((m) => m.role !== 'root');
+  const filtered = members.filter((m) => m.role !== 'root' && m.role !== 'pool');
 
   const nodeMap = new Map<number, MemberNode>();
   for (const m of filtered) {

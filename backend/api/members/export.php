@@ -57,7 +57,7 @@ try {
                 u.investment_amount, u.wallet_address, u.created_at,
                 (SELECT COUNT(*) FROM users c WHERE c.referrer_id = u.id) AS direct_referral_count
          FROM users u
-         WHERE u.role != :role
+         WHERE u.role NOT IN (:role, 'pool')
          ORDER BY u.id ASC"
     );
     $stmt->execute([':role' => 'root']);

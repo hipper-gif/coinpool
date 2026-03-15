@@ -528,7 +528,7 @@ export default function MemberDetail() {
       </div>
 
       {/* メンバー削除（管理者ユーザーには非表示） */}
-      {member.role !== 'admin' && member.role !== 'root' && (
+      {member.role !== 'admin' && member.role !== 'root' && member.role !== 'pool' && (
         <div className="mt-6 border-t border-gray-200 pt-6">
           {deleteError && (
             <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-3 text-red-700 text-sm">

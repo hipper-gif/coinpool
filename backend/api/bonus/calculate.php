@@ -52,10 +52,10 @@ try {
     // マスターデータを一括取得
     // ---------------------------------------------------------------
 
-    // 全ユーザー
+    // 全ユーザー（pool除外）
     $stmt = $pdo->query(
-        'SELECT id, name, referrer_id, investment_amount, rank
-         FROM users ORDER BY id ASC'
+        "SELECT id, name, referrer_id, investment_amount, rank
+         FROM users WHERE role != 'pool' ORDER BY id ASC"
     );
     $allUsers = $stmt->fetchAll();
 

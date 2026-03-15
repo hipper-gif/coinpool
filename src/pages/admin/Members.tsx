@@ -515,7 +515,7 @@ export default function Members() {
                       })}
                     </td>
                     <td className="py-3 px-4 text-center">
-                      {m.role !== 'admin' && m.role !== 'root' && (
+                      {m.role !== 'admin' && m.role !== 'root' && m.role !== 'pool' && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

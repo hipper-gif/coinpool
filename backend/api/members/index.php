@@ -61,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
              FROM users u
              LEFT JOIN users r ON r.id = u.referrer_id
              LEFT JOIN bonus_snapshots bs ON bs.user_id = u.id
-             WHERE u.role != \'root\'
+             WHERE u.role NOT IN (\'root\', \'pool\')
              ORDER BY u.id ASC'
         );
         $users       = $stmt->fetchAll();

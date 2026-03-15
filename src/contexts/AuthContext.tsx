@@ -8,7 +8,7 @@ import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import apiClient from '../api/axios';
 
-export type UserRole = 'root' | 'admin' | 'member';
+export type UserRole = 'root' | 'admin' | 'member' | 'pool';
 
 export interface User {
   id: number;
