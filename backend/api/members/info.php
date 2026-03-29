@@ -145,7 +145,7 @@ try {
 
     // 紹介者チェーン用: 全ユーザーをID→情報のマップに（効率のため一括取得）
     $stmt = $pdo->query(
-        'SELECT id, name, email, rank, wallet_address, referrer_id FROM users'
+        'SELECT id, name, email, rank, wallet_address, referrer_id, investment_amount FROM users'
     );
     $allUsers = $stmt->fetchAll();
     $userMap = [];
@@ -267,11 +267,22 @@ try {
         }
     }
 
-    // Rank conditions
-    $stmt = $pdo->query('SELECT rank, infinity_rate FROM rank_conditions');
+    // Rank conditions (infinity + megamatch)
+    $stmt = $pdo->query(
+        'SELECT rank, infinity_rate, megamatch_same_rate, megamatch_upper_rate,
+                mm_min_investment, mm_min_direct_referrals, mm_min_group_investment
+         FROM rank_conditions'
+    );
     $rankConditions = [];
     foreach ($stmt->fetchAll() as $rc) {
-        $rankConditions[$rc['rank']] = ['infinity_rate' => (float)$rc['infinity_rate']];
+        $rankConditions[$rc['rank']] = [
+            'infinity_rate'          => (float)$rc['infinity_rate'],
+            'megamatch_same_rate'    => (float)$rc['megamatch_same_rate'],
+            'megamatch_upper_rate'   => (float)$rc['megamatch_upper_rate'],
+            'mm_min_investment'      => (float)$rc['mm_min_investment'],
+            'mm_min_direct_referrals'=> (int)$rc['mm_min_direct_referrals'],
+            'mm_min_group_investment'=> (float)$rc['mm_min_group_investment'],
+        ];
     }
     $rankOrder = ['none' => 0, 'bronze' => 1, 'silver' => 2, 'gold' => 3, 'platinum' => 4, 'diamond' => 5];
 
@@ -309,6 +320,139 @@ try {
                     'email' => $ancestor['email'],
                     'rank' => $ancestorRank,
                     'wallet_address' => $ancestor['wallet_address'],
+                ],
+            ];
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // B2. Megamatch flow (who does this member receive megamatch FROM?)
+    // ---------------------------------------------------------------
+    $megamatchFlow = [];
+    $targetRank = $user['rank'] ?? 'none';
+    $targetRankOrder = $rankOrder[$targetRank] ?? 0;
+
+    if ($targetRank !== 'none' && isset($rankConditions[$targetRank])) {
+        // Helper: get all descendants
+        $getDescendantsForInfo = function(int $uid, array $cmap) use (&$getDescendantsForInfo): array {
+            $result = [];
+            foreach ($cmap[$uid] ?? [] as $cid) {
+                $result[] = $cid;
+                $result = array_merge($result, $getDescendantsForInfo($cid, $cmap));
+            }
+            return $result;
+        };
+
+        // Check if THIS member qualifies for megamatch
+        $rc = $rankConditions[$targetRank];
+        $myInvest = (float)$user['investment_amount'];
+        $myDirectCount = count($childrenMap[$targetId] ?? []);
+        $myDescendants = $getDescendantsForInfo($targetId, $childrenMap);
+        $myGroupInvest = 0;
+        foreach ($myDescendants as $did) {
+            $myGroupInvest += (float)($userMap[$did]['investment_amount'] ?? 0);
+        }
+
+        $mmQualified = ($myInvest >= $rc['mm_min_investment'])
+            && ($myDirectCount >= $rc['mm_min_direct_referrals'])
+            && ($myGroupInvest >= $rc['mm_min_group_investment']);
+
+        if ($mmQualified) {
+            // Find ranked subordinates this member takes megamatch from
+            foreach ($myDescendants as $descId) {
+                if (!isset($userMap[$descId])) continue;
+                $descRank = $userMap[$descId]['rank'] ?? 'none';
+                if ($descRank === 'none') continue;
+                $descRankOrder = $rankOrder[$descRank] ?? 0;
+
+                if ($descRankOrder === $targetRankOrder) {
+                    $mmRate = $rc['megamatch_same_rate'];
+                    $mmType = 'same';
+                } elseif ($descRankOrder > $targetRankOrder) {
+                    $mmRate = $rc['megamatch_upper_rate'];
+                    $mmType = 'upper';
+                } else {
+                    continue; // lower rank subordinates: no megamatch
+                }
+                if ($mmRate <= 0) continue;
+
+                $desc = $userMap[$descId];
+                $megamatchFlow[] = [
+                    'rate' => round($mmRate, 2),
+                    'type' => $mmType,
+                    'direction' => 'incoming',
+                    'source' => [
+                        'id' => (int)$desc['id'],
+                        'name' => $desc['name'],
+                        'email' => $desc['email'],
+                        'rank' => $descRank,
+                        'wallet_address' => $desc['wallet_address'],
+                    ],
+                ];
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // B3. Megamatch outgoing (who takes megamatch FROM this member?)
+    // ---------------------------------------------------------------
+    if ($targetRank !== 'none') {
+        if (!isset($getDescendantsForInfo)) {
+            $getDescendantsForInfo = function(int $uid, array $cmap) use (&$getDescendantsForInfo): array {
+                $result = [];
+                foreach ($cmap[$uid] ?? [] as $cid) {
+                    $result[] = $cid;
+                    $result = array_merge($result, $getDescendantsForInfo($cid, $cmap));
+                }
+                return $result;
+            };
+        }
+
+        // Walk up ancestors to find MM-qualified uplines who take from this member
+        foreach ($path as $idx => $ancestorId) {
+            if ($idx === 0) continue; // skip self
+            if (!isset($userMap[$ancestorId])) continue;
+            $anc = $userMap[$ancestorId];
+            $ancRank = $anc['rank'] ?? 'none';
+            if ($ancRank === 'none' || !isset($rankConditions[$ancRank])) continue;
+            $ancRankOrder = $rankOrder[$ancRank] ?? 0;
+
+            // Megamatch: ancestor takes from same or higher rank subordinates
+            if ($ancRankOrder > $targetRankOrder) continue;
+
+            // Check if ancestor qualifies for megamatch
+            $arcRc = $rankConditions[$ancRank];
+            $ancInvest = (float)($userMap[$ancestorId]['investment_amount'] ?? 0);
+            if ($ancInvest < $arcRc['mm_min_investment']) continue;
+            $ancDirectCount = count($childrenMap[$ancestorId] ?? []);
+            if ($ancDirectCount < $arcRc['mm_min_direct_referrals']) continue;
+            $ancDesc = $getDescendantsForInfo($ancestorId, $childrenMap);
+            $ancGroupInvest = 0;
+            foreach ($ancDesc as $did) {
+                $ancGroupInvest += (float)($userMap[$did]['investment_amount'] ?? 0);
+            }
+            if ($ancGroupInvest < $arcRc['mm_min_group_investment']) continue;
+
+            // Determine rate
+            if ($ancRankOrder === $targetRankOrder) {
+                $mmRate = $arcRc['megamatch_same_rate'];
+                $mmType = 'same';
+            } else {
+                $mmRate = $arcRc['megamatch_upper_rate'];
+                $mmType = 'upper';
+            }
+            if ($mmRate <= 0) continue;
+
+            $megamatchFlow[] = [
+                'rate' => round($mmRate, 2),
+                'type' => $mmType,
+                'direction' => 'outgoing',
+                'source' => [
+                    'id' => (int)$anc['id'],
+                    'name' => $anc['name'],
+                    'email' => $anc['email'],
+                    'rank' => $ancRank,
+                    'wallet_address' => $anc['wallet_address'],
                 ],
             ];
         }
@@ -369,6 +513,28 @@ try {
         $infinityTotal += $inf['rate'];
     }
 
+    $megamatchTotal = 0;
+    $megamatchItems = [];
+    foreach ($megamatchFlow as $mm) {
+        $typeLabel = $mm['type'] === 'same' ? '同ランク' : '上位ランク';
+        $dir = $mm['direction'] ?? 'incoming';
+        if ($dir === 'incoming') {
+            $label = $mm['source']['name'] . ' から受取（' . $typeLabel . '）';
+        } else {
+            $label = $mm['source']['name'] . ' へ控除（' . $typeLabel . '）';
+        }
+        $megamatchItems[] = [
+            'label' => $label,
+            'pct' => $mm['rate'],
+            'wallet_address' => $mm['source']['wallet_address'],
+            'recipient_name' => $mm['source']['name'],
+            'recipient_rank' => $mm['source']['rank'],
+            'type' => $mm['type'],
+            'direction' => $dir,
+        ];
+        $megamatchTotal += $mm['rate'];
+    }
+
     // 会社手数料: ウォレット未登録でもcompany_fee_rate分は必ず計上
     $companyTotal = 0;
     foreach ($feeWallets as $fw) {
@@ -385,7 +551,7 @@ try {
         $companyTotal = $companyFeeRate;
     }
 
-    $allocatedTotal = round($memberPct + $unilevelTotal + $infinityTotal + $poolContribPct + $companyTotal, 2);
+    $allocatedTotal = round($memberPct + $unilevelTotal + $infinityTotal + $megamatchTotal + $poolContribPct + $companyTotal, 2);
     $unallocatedPct = round(100 - $allocatedTotal, 2);
 
     $transferAllocation = [
@@ -401,6 +567,8 @@ try {
         'unilevel_total_pct' => round($unilevelTotal, 2),
         'infinity' => $infinityItems,
         'infinity_total_pct' => round($infinityTotal, 2),
+        'megamatch' => $megamatchItems,
+        'megamatch_total_pct' => round($megamatchTotal, 2),
         'pool_contribution' => [
             'pct' => $poolContribPct,
             'wallet_address' => $poolWallet ? $poolWallet['wallet_address'] : null,

@@ -84,6 +84,8 @@ interface TransferAllocation {
   unilevel_total_pct: number;
   infinity: (TransferAllocationItem & { recipient_rank?: string })[];
   infinity_total_pct: number;
+  megamatch: (TransferAllocationItem & { recipient_rank?: string; type?: string })[];
+  megamatch_total_pct: number;
   pool_contribution: { pct: number; wallet_address: string | null; label: string };
   company: FeeWallet[];
   company_total_pct: number;
@@ -365,6 +367,25 @@ export default function MemberInfo() {
                       </tr>
                       {detail.transfer_allocation.infinity.map((item, i) => (
                         <tr key={`inf-${i}`} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
+                          <td className="py-2.5 px-4 text-gray-600 text-xs">{item.label}</td>
+                          <td className="py-2.5 px-4 text-gray-800 font-medium">{item.recipient_name}</td>
+                          <td className="py-2.5 px-4 text-xs font-mono text-gray-500 max-w-[160px] truncate" title={item.wallet_address ?? ''}>
+                            {item.wallet_address ? item.wallet_address.slice(0, 6) + '...' + item.wallet_address.slice(-4) : '---'}
+                          </td>
+                          <td className="py-2.5 px-4 text-right text-indigo-700 font-semibold tabular-nums">{item.pct}%</td>
+                        </tr>
+                      ))}
+                    </>
+                  )}
+
+                  {/* Section separator: メガマッチ */}
+                  {detail.transfer_allocation.megamatch.length > 0 && (
+                    <>
+                      <tr className="bg-gray-50">
+                        <td colSpan={4} className="py-1.5 px-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">③ メガマッチ（合計 {detail.transfer_allocation.megamatch_total_pct}%）</td>
+                      </tr>
+                      {detail.transfer_allocation.megamatch.map((item, i) => (
+                        <tr key={`mm-${i}`} className="border-b border-gray-50 hover:bg-gray-50 transition-colors">
                           <td className="py-2.5 px-4 text-gray-600 text-xs">{item.label}</td>
                           <td className="py-2.5 px-4 text-gray-800 font-medium">{item.recipient_name}</td>
                           <td className="py-2.5 px-4 text-xs font-mono text-gray-500 max-w-[160px] truncate" title={item.wallet_address ?? ''}>
