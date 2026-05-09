@@ -28,3 +28,6 @@ backend/config/database.php
 *.njsproj
 *.sln
 *.sw?
+
+# Claude Code (local-only)
+.claude/
